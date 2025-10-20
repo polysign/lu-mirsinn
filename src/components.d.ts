@@ -5,27 +5,30 @@
  * It contains typing information for all components that exist in this project.
  */
 import { HTMLStencilElement, JSXBase } from "@stencil/core/internal";
+import { LanguageCode } from "./types/language";
+export { LanguageCode } from "./types/language";
 export namespace Components {
-    interface AppHome {
+    interface AppHistory {
+        "language": LanguageCode;
     }
-    interface AppProfile {
-        "name": string;
+    interface AppHome {
+        "language": LanguageCode;
     }
     interface AppRoot {
     }
 }
 declare global {
+    interface HTMLAppHistoryElement extends Components.AppHistory, HTMLStencilElement {
+    }
+    var HTMLAppHistoryElement: {
+        prototype: HTMLAppHistoryElement;
+        new (): HTMLAppHistoryElement;
+    };
     interface HTMLAppHomeElement extends Components.AppHome, HTMLStencilElement {
     }
     var HTMLAppHomeElement: {
         prototype: HTMLAppHomeElement;
         new (): HTMLAppHomeElement;
-    };
-    interface HTMLAppProfileElement extends Components.AppProfile, HTMLStencilElement {
-    }
-    var HTMLAppProfileElement: {
-        prototype: HTMLAppProfileElement;
-        new (): HTMLAppProfileElement;
     };
     interface HTMLAppRootElement extends Components.AppRoot, HTMLStencilElement {
     }
@@ -34,22 +37,23 @@ declare global {
         new (): HTMLAppRootElement;
     };
     interface HTMLElementTagNameMap {
+        "app-history": HTMLAppHistoryElement;
         "app-home": HTMLAppHomeElement;
-        "app-profile": HTMLAppProfileElement;
         "app-root": HTMLAppRootElement;
     }
 }
 declare namespace LocalJSX {
-    interface AppHome {
+    interface AppHistory {
+        "language"?: LanguageCode;
     }
-    interface AppProfile {
-        "name"?: string;
+    interface AppHome {
+        "language"?: LanguageCode;
     }
     interface AppRoot {
     }
     interface IntrinsicElements {
+        "app-history": AppHistory;
         "app-home": AppHome;
-        "app-profile": AppProfile;
         "app-root": AppRoot;
     }
 }
@@ -57,8 +61,8 @@ export { LocalJSX as JSX };
 declare module "@stencil/core" {
     export namespace JSX {
         interface IntrinsicElements {
+            "app-history": LocalJSX.AppHistory & JSXBase.HTMLAttributes<HTMLAppHistoryElement>;
             "app-home": LocalJSX.AppHome & JSXBase.HTMLAttributes<HTMLAppHomeElement>;
-            "app-profile": LocalJSX.AppProfile & JSXBase.HTMLAttributes<HTMLAppProfileElement>;
             "app-root": LocalJSX.AppRoot & JSXBase.HTMLAttributes<HTMLAppRootElement>;
         }
     }

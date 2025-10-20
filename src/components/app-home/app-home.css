@@ -1,25 +1,180 @@
-.app-home {
-  padding: 10px;
+.question-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.card {
+  background: var(--card-surface, #ffffff);
+  border: 2px solid rgba(0, 0, 0, 0.05);
+  padding: 1.1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.meta {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.context {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.answer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.answer-form label {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+select {
+  appearance: none;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  padding: 0.85rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background: var(--lux-white);
+  color: var(--app-text);
+}
+
+select:focus {
+  outline: 3px solid rgba(0, 161, 222, 0.4);
+  outline-offset: 1px;
 }
 
 button {
-  background: #5851ff;
-  color: white;
-  margin: 8px;
   border: none;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  padding: 16px 20px;
-  border-radius: 2px;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
-  outline: 0;
-  letter-spacing: 0.04em;
-  transition: all 0.15s ease;
   cursor: pointer;
+  padding: 1rem 1.2rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 0.95rem;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
 }
 
-button:hover {
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.1);
+button:active {
   transform: translateY(1px);
+}
+
+.primary {
+  background: linear-gradient(90deg, var(--lux-red), var(--lux-blue));
+  color: var(--lux-white);
+}
+
+.primary:disabled {
+  background: rgba(0, 161, 222, 0.3);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: not-allowed;
+}
+
+.secondary {
+  background: var(--lux-white);
+  color: var(--app-text);
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.link-button {
+  background: none;
+  color: var(--lux-blue);
+  padding: 0;
+  align-self: flex-start;
+}
+
+.info-card p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 0.95rem;
+}
+
+.already-answered {
+  border: 2px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 161, 222, 0.08);
+  padding: 0.85rem;
+}
+
+.already-answered p {
+  margin: 0;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.78);
+}
+
+.share-feedback {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.share-feedback.error {
+  color: var(--lux-red);
+}
+
+.card-loading {
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.loader-dot {
+  width: 12px;
+  height: 12px;
+  background: var(--lux-blue);
+  animation: pulse 1s infinite alternate;
+}
+
+.loader-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loader-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+}
+
+.error-card {
+  border: 2px solid var(--lux-red);
+  background: rgba(237, 41, 57, 0.1);
 }

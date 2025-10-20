@@ -1,17 +1,15 @@
 import { newE2EPage } from '@stencil/core/testing';
 
 describe('app-root', () => {
-  it.skip('renders', async () => {
+  it('renders the shell and navigation', async () => {
     const page = await newE2EPage({ url: '/' });
-
     const element = await page.find('app-root');
     expect(element).toHaveClass('hydrated');
-  });
 
-  it.skip('renders the title', async () => {
-    const page = await newE2EPage({ url: '/' });
+    const title = await page.find('app-root >>> .title');
+    expect(title.textContent).toEqual('Mir Sinn');
 
-    const element = await page.find('app-root >>> h1');
-    expect(element.textContent).toEqual('Stencil App Starter');
+    const navButtons = await page.findAll('app-root >>> .nav-button');
+    expect(navButtons.length).toBe(2);
   });
 });
