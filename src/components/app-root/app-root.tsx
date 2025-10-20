@@ -13,6 +13,8 @@ const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'en', label: 'English' },
 ];
 
+const LANGUAGE_STORAGE_KEY = 'mir-sinn-lang';
+
 @Component({
   tag: 'app-root',
   styleUrl: 'app-root.css',
@@ -29,6 +31,10 @@ export class AppRoot {
 
   connectedCallback() {
     if (typeof window !== 'undefined') {
+      const stored = this.readStoredLanguage();
+      if (stored) {
+        this.language = stored;
+      }
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
     }
@@ -44,12 +50,33 @@ export class AppRoot {
     const select = event.target as HTMLSelectElement;
     const next = select.value as LanguageCode;
     this.language = next;
+    this.persistLanguage(next);
   };
 
   private navigate = (path: string) => {
     Router.push(path);
     this.currentPath = path;
   };
+
+  private readStoredLanguage(): LanguageCode | null {
+    try {
+      const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+      if (languages.some(lang => lang.code === stored)) {
+        return stored as LanguageCode;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  private persistLanguage(lang: LanguageCode) {
+    try {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+    } catch {
+      /* ignore persistence issues */
+    }
+  }
 
   render() {
     const navLabels: Record<LanguageCode, { question: string; history: string }> = {

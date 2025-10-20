@@ -10,6 +10,8 @@ import {
 } from '../../services/firebase';
 import { fallbackQuestion } from '../../services/mock-data';
 import type { LanguageCode } from '../../types/language';
+import infoIcon from '../../assets/icons/regular/info.svg';
+import megaphoneIcon from '../../assets/icons/regular/megaphone.svg';
 type ErrorKey = 'missing-question' | 'load-failed' | 'submit-failed';
 
 interface ViewState {
@@ -67,6 +69,18 @@ const copy: Record<
     shareTextSuffix: string;
     pointsTitle: string;
     pointsSubtitle: string;
+    aboutTitle: string;
+    aboutDescription: string;
+    aboutBuiltBy: string;
+    aboutHelpLabel: string;
+    dialogTitle: string;
+    dialogConfirm: string;
+    dialogCloseLabel: string;
+    termsHeading: string;
+    termsBody: string;
+    privacyHeading: string;
+    privacyEmphasis: string;
+    privacyBody: string;
   }
 > = {
   lb: {
@@ -92,6 +106,21 @@ const copy: Record<
     shareTextSuffix: "Beäntwert d'Fro am Mir Sinn App.",
     pointsTitle: 'Deng Punkten',
     pointsSubtitle: '+100 pro Äntwert',
+    aboutTitle: 'Mir Sinn',
+    aboutDescription:
+      "Mir Sinn ass eng Initiativ fir d'Meenung vu Lëtzebuerg ze sammelen. Dréit all Dag bäi a entdeckt, wat d'Gemeinschaft denkt.",
+    aboutBuiltBy: 'Entwéckelt vun',
+    aboutHelpLabel: 'Konditiounen & Dateschutz',
+    dialogTitle: 'Konditiounen & Dateschutz',
+    dialogConfirm: 'Verstanen',
+    dialogCloseLabel: 'Dialog zoumaachen',
+    termsHeading: 'Nutzungsbedéngungen',
+    termsBody:
+      "Mir Sinn bitt eng deeglech Fro. D'Participatioun ass fräi a fräiwëlleg; mat der Notzung stëmmt Dir zou, datt Är anonym Äntwerten an aggregéierter Form gewise ginn.",
+    privacyHeading: 'Dateschutz',
+    privacyEmphasis: 'Mir späicheren keng perséinlech Benotzerdate.',
+    privacyBody:
+      "Mir halen nëmmen eng generéiert Device-ID, eng Referral-Info, Är Optioun an Är Punkten, fir d'Participatioun ze verwalten an anonym Statistiken ze generéieren.",
   },
   fr: {
     context:
@@ -120,6 +149,21 @@ const copy: Record<
       "Réponds à la question dans l'application Mir Sinn.",
     pointsTitle: 'Vos points',
     pointsSubtitle: '+100 par réponse',
+    aboutTitle: 'Mir Sinn',
+    aboutDescription:
+      "Mir Sinn est une initiative pour recueillir le ressenti du Luxembourg. Participe chaque jour et découvre ce que pense la communauté.",
+    aboutBuiltBy: 'Conçu par',
+    aboutHelpLabel: 'Conditions & vie privée',
+    dialogTitle: 'Conditions & vie privée',
+    dialogConfirm: 'Compris',
+    dialogCloseLabel: 'Fermer la fenêtre',
+    termsHeading: "Conditions d'utilisation",
+    termsBody:
+      "Mir Sinn propose une question quotidienne. L’usage est gratuit et volontaire ; en participant, vous acceptez que vos réponses anonymes soient utilisées pour des résultats agrégés.",
+    privacyHeading: 'Vie privée',
+    privacyEmphasis: 'Nous ne stockons aucune donnée personnelle.',
+    privacyBody:
+      "Seule une ID générée pour l’appareil, un code de partage, votre réponse et vos points sont conservés afin de limiter les doublons et produire des statistiques anonymes.",
   },
   de: {
     context: 'Deine Stimme zeigt, was Luxemburg denkt.',
@@ -147,6 +191,21 @@ const copy: Record<
       'Beantworte die Frage in der Mir Sinn App.',
     pointsTitle: 'Deine Punkte',
     pointsSubtitle: '+100 pro Antwort',
+    aboutTitle: 'Mir Sinn',
+    aboutDescription:
+      'Mir Sinn sammelt täglich die Stimmung Luxemburgs. Mach mit und erfahre, wie die Gemeinschaft denkt.',
+    aboutBuiltBy: 'Entwickelt von',
+    aboutHelpLabel: 'Infos & Datenschutz',
+    dialogTitle: 'Infos & Datenschutz',
+    dialogConfirm: 'Verstanden',
+    dialogCloseLabel: 'Dialog schließen',
+    termsHeading: 'Nutzungsbedingungen',
+    termsBody:
+      'Mir Sinn stellt täglich eine Frage bereit. Die Nutzung ist freiwillig; mit der Teilnahme stimmst du zu, dass deine anonymen Antworten für aggregierte Resultate genutzt werden.',
+    privacyHeading: 'Datenschutz',
+    privacyEmphasis: 'Wir speichern keine persönlichen Nutzerdaten.',
+    privacyBody:
+      'Lediglich eine erzeugte Geräte-ID, ein Empfehlungs-Code, deine Antwort und deine Punkte werden aufbewahrt, um Mehrfachteilnahmen zu vermeiden und anonyme Statistiken zu erstellen.',
   },
   en: {
     context: 'Your voice helps us understand how Luxembourg thinks.',
@@ -174,6 +233,21 @@ const copy: Record<
       'Answer the question in the Mir Sinn app.',
     pointsTitle: 'Your points',
     pointsSubtitle: '+100 per answer',
+    aboutTitle: 'Mir Sinn',
+    aboutDescription:
+      'Mir Sinn captures Luxembourg’s daily pulse. Take part every day and see what the community thinks.',
+    aboutBuiltBy: 'Built by',
+    aboutHelpLabel: 'Terms & privacy',
+    dialogTitle: 'Terms & Privacy',
+    dialogConfirm: 'Got it',
+    dialogCloseLabel: 'Close dialog',
+    termsHeading: 'Terms of Service',
+    termsBody:
+      'Mir Sinn provides one daily question. Participation is free and optional; by answering you agree that your anonymous answers may be used to present aggregated results.',
+    privacyHeading: 'Privacy',
+    privacyEmphasis: 'We do not store any personal user data.',
+    privacyBody:
+      'We only keep a generated device ID, a referral code, your answer choice, and your points to prevent duplicate participation and to build anonymous statistics.',
   },
 };
 
@@ -193,6 +267,7 @@ export class AppHome {
   @State() shareStatus: 'idle' | 'success' | 'error' = 'idle';
   @State() points: number | null = null;
   @State() confettiBurst = false;
+  @State() showPolicies = false;
 
   private todayKey = getTodayKey();
   private hasFirebase = false;
@@ -217,6 +292,7 @@ export class AppHome {
       window.clearTimeout(this.confettiTimeout);
     }
     this.deviceSnapshot = null;
+    this.showPolicies = false;
   }
 
   @Watch('language')
@@ -541,10 +617,10 @@ export class AppHome {
 
   private renderLoader() {
     return (
-      <div class="card card-loading">
-        <div class="loader-dot" />
-        <div class="loader-dot" />
-        <div class="loader-dot" />
+      <div class="page-loader">
+        <span class="page-loader-dot dot-red" />
+        <span class="page-loader-dot dot-white" />
+        <span class="page-loader-dot dot-red" />
       </div>
     );
   }
@@ -613,7 +689,11 @@ export class AppHome {
 
   render() {
     if (this.state.loading) {
-      return this.renderLoader();
+      return (
+        <div class="loading-screen" aria-busy="true">
+          {this.renderLoader()}
+        </div>
+      );
     }
 
     if (this.state.errorKey) {
@@ -630,7 +710,7 @@ export class AppHome {
     const summaryText = this.getLocalizedSummary(question);
 
     return (
-      <div class="question-view">
+      <div class={{ 'question-view': true, 'question-view--visible': true }}>
         {this.renderConfetti()}
         <section class="card question-card">
           <header>
@@ -649,7 +729,9 @@ export class AppHome {
         <section class="card action-card">
           <button class="secondary" type="button" onClick={() => this.handleShare()}>
             <span>{translations.shareButton}</span>
-            <span aria-hidden="true">📣</span>
+            <span class="action-icon" aria-hidden="true">
+              <img src={megaphoneIcon} alt="" />
+            </span>
           </button>
           {this.shareStatus === 'success' && (
             <p class="share-feedback">{translations.shareSuccess}</p>
@@ -676,20 +758,71 @@ export class AppHome {
 
         <section class="card about-card">
           <header>
-            <span class="about-title">Mir Sinn</span>
+            <span class="about-title">{translations.aboutTitle}</span>
             <span class="about-version">v0.0.1</span>
           </header>
-          <p class="about-text">
-            Mir Sinn ass eng Initiativ fir d'Meenung vu Lëtzebuerg ze sammelen.
-            Dréit all Dag bäi a entdeckt, wat d'Gemeinschaft denkt.
-          </p>
+          <p class="about-text">{translations.aboutDescription}</p>
           <footer class="about-footer">
-            <span class="about-built">Built by</span>
+            <span class="about-built">{translations.aboutBuiltBy}</span>
             <a href="https://autonoma.lu" target="_blank" rel="noopener">
               Autonoma.lu
             </a>
+            <button
+              class="about-help"
+              type="button"
+              onClick={() => (this.showPolicies = true)}
+              aria-label={translations.aboutHelpLabel}
+            >
+              <img src={infoIcon} alt="" />
+            </button>
           </footer>
         </section>
+        {this.renderPoliciesDialog()}
+      </div>
+    );
+  }
+
+  private renderPoliciesDialog() {
+    if (!this.showPolicies) return null;
+    const translations = this.translations;
+    return (
+      <div
+        class="dialog-backdrop"
+        role="presentation"
+        onClick={event => {
+          if (event.target === event.currentTarget) this.showPolicies = false;
+        }}
+      >
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="policies-title">
+          <header class="dialog-header">
+            <h3 id="policies-title">{translations.dialogTitle}</h3>
+            <button
+              class="dialog-close"
+              type="button"
+              onClick={() => (this.showPolicies = false)}
+              aria-label={translations.dialogCloseLabel}
+            >
+              ×
+            </button>
+          </header>
+          <div class="dialog-body">
+            <section>
+              <h4>{translations.termsHeading}</h4>
+              <p>{translations.termsBody}</p>
+            </section>
+            <section>
+              <h4>{translations.privacyHeading}</h4>
+              <p>
+                <strong>{translations.privacyEmphasis}</strong> {translations.privacyBody}
+              </p>
+            </section>
+          </div>
+          <footer class="dialog-footer">
+            <button class="primary" type="button" onClick={() => (this.showPolicies = false)}>
+              {translations.dialogConfirm}
+            </button>
+          </footer>
+        </div>
       </div>
     );
   }

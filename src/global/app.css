@@ -21,6 +21,7 @@ body {
   background: var(--app-surface);
   color: var(--app-text);
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 a {
