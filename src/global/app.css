@@ -13,6 +13,11 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   padding: 0;
