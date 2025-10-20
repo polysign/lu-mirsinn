@@ -799,7 +799,7 @@ export class AppHome {
         <section class="card about-card">
           <header>
             <span class="about-title">{translations.aboutTitle}</span>
-            <span class="about-version">v0.0.3</span>
+            <span class="about-version">v0.0.4</span>
           </header>
           <p class="about-text">{translations.aboutDescription}</p>
           <footer class="about-footer">
