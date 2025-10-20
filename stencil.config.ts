@@ -14,6 +14,9 @@ export const config: Config = {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
       },
       baseUrl: 'https://mir-sinn.lu/',
+      copy: [
+        { src: 'firebase-messaging-sw.js', dest: 'firebase-messaging-sw.js' },
+      ],
     },
   ],
 };

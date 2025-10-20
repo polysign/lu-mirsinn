@@ -59,6 +59,7 @@ export interface DeviceDocument {
   shortCode?: string;
   referrer?: string | null;
   referrals?: number;
+  fcmToken?: string | null;
   createdAt?: string | null;
   lastAnsweredAt?: string | null;
 }
@@ -257,7 +258,13 @@ export async function getRecentQuestions(
 const generateShortCode = (length = 6) => {
   const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 255);
+    }
+  }
   let code = '';
   for (let i = 0; i < length; i += 1) {
     code += alphabet[bytes[i] % alphabet.length];
@@ -293,6 +300,7 @@ export async function ensureDeviceDocument(
         shortCode,
         referrer: referrerCode || null,
         referrals: 0,
+        fcmToken: null,
         createdAt: new Date().toISOString(),
         lastAnsweredAt: null,
       };
@@ -325,6 +333,9 @@ export async function ensureDeviceDocument(
     }
     if (!('lastAnsweredAt' in data)) {
       update.lastAnsweredAt = null;
+    }
+    if (!('fcmToken' in data)) {
+      update.fcmToken = null;
     }
     let awardedReferrer = false;
     if (referrerCode && !data.referrer && referrerCode !== data.shortCode) {
@@ -373,6 +384,29 @@ async function incrementReferrerPoints(db: Firestore, shortCode: string) {
     );
   } catch (error) {
     console.warn('[firebase] Failed to reward referrer', error);
+  }
+}
+
+export async function updateDeviceMessagingToken(
+  deviceId: string,
+  token: string,
+): Promise<void> {
+  const db = ensureFirestore();
+  if (!db || !deviceId || !token) return;
+  try {
+    await ensureDeviceDocument(deviceId);
+    const deviceRef = doc(db, 'devices', deviceId);
+    await setDoc(
+      deviceRef,
+      {
+        deviceId,
+        fcmToken: token,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.warn('[firebase] Unable to store messaging token', error);
   }
 }
 

@@ -1,5 +1,6 @@
 import { ensureDeviceIdOnWindow } from '../services/device';
 import { ensureDeviceDocument, isFirebaseConfigured } from '../services/firebase';
+import { registerMessagingForDevice } from '../services/messaging';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
 const registerServiceWorker = async () => {
@@ -40,6 +41,7 @@ export default async () => {
     if (deviceDoc?.shortCode) {
       (window as any).__DEVICE_SHORT_CODE__ = deviceDoc.shortCode;
     }
+    registerMessagingForDevice(deviceId);
   }
   registerServiceWorker();
 };
