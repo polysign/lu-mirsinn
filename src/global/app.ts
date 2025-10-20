@@ -3,13 +3,37 @@ import { ensureDeviceDocument, isFirebaseConfigured } from '../services/firebase
 import { registerMessagingForDevice } from '../services/messaging';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
+let swRefreshQueued = false;
+
 const registerServiceWorker = async () => {
   if (!('serviceWorker' in navigator)) return;
   if (location.hostname === 'localhost' || location.protocol === 'http:') {
     return;
   }
   try {
-    await navigator.serviceWorker.register('/sw.js');
+    const registration = await navigator.serviceWorker.register('/sw.js');
+
+    const triggerSkipWaiting = (worker: ServiceWorker | null) => {
+      if (worker && worker.state === 'installed' && navigator.serviceWorker.controller) {
+        worker.postMessage({ type: 'SKIP_WAITING' });
+      }
+    };
+
+    if (registration.waiting) {
+      triggerSkipWaiting(registration.waiting);
+    }
+
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener('statechange', () => triggerSkipWaiting(newWorker));
+    });
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (swRefreshQueued) return;
+      swRefreshQueued = true;
+      window.location.reload();
+    });
   } catch (err) {
     console.warn('[sw] Failed to register service worker', err);
   }

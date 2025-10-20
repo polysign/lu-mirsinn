@@ -12,6 +12,7 @@ import { fallbackQuestion } from '../../services/mock-data';
 import type { LanguageCode } from '../../types/language';
 import infoIcon from '../../assets/icons/regular/info.svg';
 import megaphoneIcon from '../../assets/icons/regular/megaphone.svg';
+import { registerMessagingForDevice } from '../../services/messaging';
 type ErrorKey = 'missing-question' | 'load-failed' | 'submit-failed';
 
 interface ViewState {
@@ -378,6 +379,9 @@ export class AppHome {
   private setupDeviceSubscription() {
     if (!this.hasFirebase) {
       this.loadLocalPoints(false);
+      if (this.deviceId) {
+        registerMessagingForDevice(this.deviceId, false);
+      }
       return;
     }
 
@@ -398,6 +402,9 @@ export class AppHome {
       const points = doc?.points ?? 0;
       const shouldAnimate = this.previousPoints !== null;
       this.handlePointsUpdate(points, shouldAnimate);
+      if (doc && (!doc.fcmToken || doc.fcmToken.length === 0)) {
+        registerMessagingForDevice(id, true);
+      }
     });
   }
 
@@ -538,6 +545,9 @@ export class AppHome {
         errorKey: undefined,
       };
       this.shareStatus = 'idle';
+      if (this.deviceId) {
+        registerMessagingForDevice(this.deviceId, true);
+      }
     } catch (error) {
       console.error(error);
       this.state = {

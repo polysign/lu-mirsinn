@@ -33,13 +33,16 @@ const ensureMessagingRegistration = async () => {
   return registrationPromise;
 };
 
-export const registerMessagingForDevice = async (deviceId: string) => {
+export const registerMessagingForDevice = async (deviceId: string, forcePrompt = false) => {
   if (!deviceId || !isFirebaseConfigured()) return;
   const supported = await messagingIsSupported().catch(() => false);
   if (!supported) return;
   if (!('Notification' in window)) return;
 
-  const permission = await Notification.requestPermission();
+  let permission: NotificationPermission = Notification.permission;
+  if (forcePrompt || permission === 'default') {
+    permission = await Notification.requestPermission();
+  }
   if (permission !== 'granted') {
     return;
   }
