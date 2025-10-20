@@ -16,6 +16,18 @@ import { registerMessagingForDevice } from '../../services/messaging';
 import { logAnalyticsEvent } from '../../services/analytics';
 type ErrorKey = 'missing-question' | 'load-failed' | 'submit-failed';
 
+type QuestionCacheEntry = {
+  dateKey: string | null;
+  question: QuestionDocument | null;
+  alreadyAnswered: boolean;
+};
+
+const questionCache: QuestionCacheEntry = {
+  dateKey: null,
+  question: null,
+  alreadyAnswered: false,
+};
+
 interface ViewState {
   loading: boolean;
   question?: QuestionDocument;
@@ -313,6 +325,16 @@ export class AppHome {
   }
 
   private async loadQuestion() {
+    if (questionCache.dateKey === this.todayKey && questionCache.question) {
+      this.state = {
+        loading: false,
+        question: questionCache.question,
+        alreadyAnswered: questionCache.alreadyAnswered,
+      };
+      this.overlayVisible = false;
+      return;
+    }
+
     this.state = { loading: true, alreadyAnswered: false };
     this.overlayVisible = true;
     try {
@@ -363,6 +385,9 @@ export class AppHome {
         question,
         alreadyAnswered,
       };
+      questionCache.dateKey = this.todayKey;
+      questionCache.question = question;
+      questionCache.alreadyAnswered = alreadyAnswered;
       logAnalyticsEvent('question_loaded', {
         dateKey: this.todayKey,
         hasQuestion: Boolean(question),
@@ -379,6 +404,9 @@ export class AppHome {
         alreadyAnswered: false,
         errorKey: 'load-failed',
       };
+      questionCache.dateKey = null;
+      questionCache.question = null;
+      questionCache.alreadyAnswered = false;
       this.scheduleOverlayRemoval();
     }
   }
@@ -824,7 +852,7 @@ export class AppHome {
         <section class="card about-card">
           <header>
             <span class="about-title">{translations.aboutTitle}</span>
-            <span class="about-version">v0.0.6</span>
+            <span class="about-version">v0.0.7</span>
           </header>
           <p class="about-text">{translations.aboutDescription}</p>
           <footer class="about-footer">
