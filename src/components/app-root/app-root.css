@@ -1,192 +1,49 @@
-.app-shell {
-  min-height: 100vh;
-  background: var(--app-surface, #f7f9fb);
-  color: var(--app-text, #1b1b1f);
-  display: flex;
-  flex-direction: column;
-}
-
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  background: #f0f3f8;
-  color: var(--app-text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.home-link {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  background: transparent;
-  border: none;
-  color: inherit;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-
-.flag {
-  width: 48px;
-  height: 32px;
-  display: inline-flex;
-  flex-direction: column;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
-}
-
-.stripe {
-  flex: 1;
-}
-
-.stripe-red {
-  background: var(--lux-red);
-}
-
-.stripe-white {
-  background: var(--lux-white);
-}
-
-.stripe-blue {
-  background: var(--lux-blue);
-}
-
-.branding {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
-}
-
-.title {
-  font-weight: 700;
-  font-size: 1.35rem;
-  letter-spacing: 0.02em;
-}
-
-.subtitle {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  opacity: 0.7;
-  letter-spacing: 0.18em;
-}
-
-.language-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: rgba(255, 255, 255, 0.85);
-  padding: 0.35rem 0.75rem;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  color: inherit;
+:host {
   position: relative;
+  display: block;
 }
 
-.language-label {
-  width: 1.4rem;
-  height: 1.4rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.language-label img {
-  width: 100%;
-  height: 100%;
-}
-
-.language-select {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.language-select__current {
-  font-size: 0.95rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.language-select select {
-  color: inherit;
-  appearance: none;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.language-select select:focus {
-  outline: none;
-}
-
-.app-content {
-  padding: 1rem;
-  overflow-y: auto;
-  flex: 1 1 auto;
-}
-
-.app-nav {
-  position: sticky;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(6px);
-}
-
-.nav-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  padding: 0.65rem 0.25rem;
-  border: none;
-  background: transparent;
+.add-to-home-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 999px;
   font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--app-text);
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.nav-button:focus {
-  outline: 2px solid rgba(0, 161, 222, 0.8);
-  outline-offset: -2px;
-}
-
-.nav-button.active {
-  background: rgba(0, 161, 222, 0.12);
-  color: var(--lux-blue);
-}
-
-.nav-icon {
-  font-size: 1.2rem;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.6rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  animation: toast-slide-in 0.6s ease forwards;
+  animation-delay: 0.8s;
+  z-index: 500;
 }
 
-.nav-icon img {
-  width: 1.5rem;
-  height: 1.5rem;
+.add-to-home-toast.show {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-@media (min-width: 768px) {
-  .app-shell {
-    max-width: 480px;
-    margin: 0 auto;
-    border-left: 1px solid rgba(0, 0, 0, 0.05);
-    border-right: 1px solid rgba(0, 0, 0, 0.05);
+.toast-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+@keyframes toast-slide-in {
+  0% {
+    transform: translate(-50%, 20px);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, 0);
+    opacity: 1;
   }
 }

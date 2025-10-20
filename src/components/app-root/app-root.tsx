@@ -18,12 +18,13 @@ const LANGUAGE_STORAGE_KEY = 'mir-sinn-lang';
 
 @Component({
   tag: 'app-root',
-  styleUrl: 'app-root.css',
+  styleUrls: ['app-root.css'],
   shadow: true,
 })
 export class AppRoot {
   @State() language: LanguageCode = 'lb';
   @State() currentPath: string = '/';
+  @State() showInstallToast = false;
 
   private handlePopState = () => {
     if (typeof window === 'undefined') return;
@@ -40,6 +41,7 @@ export class AppRoot {
       }
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
+      this.evaluateInstallPrompt();
     }
   }
 
@@ -94,6 +96,36 @@ export class AppRoot {
     }
   }
 
+  private evaluateInstallPrompt() {
+    try {
+      const isStandalone =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        (window.navigator as any).standalone === true;
+      if (isStandalone) return;
+
+      const dismissedKey = 'mir-sinn-install-dismissed';
+      const dismissedDate = localStorage.getItem(dismissedKey);
+      if (dismissedDate) {
+        const diff = Date.now() - Number(dismissedDate);
+        const oneDay = 24 * 60 * 60 * 1000;
+        if (diff < oneDay) return;
+      }
+
+      this.showInstallToast = true;
+    } catch {
+      this.showInstallToast = true;
+    }
+  }
+
+  private dismissToast = () => {
+    this.showInstallToast = false;
+    try {
+      localStorage.setItem('mir-sinn-install-dismissed', String(Date.now()));
+    } catch {
+      /* ignore */
+    }
+  };
+
   render() {
     const navLabels: Record<LanguageCode, { question: string; history: string }> = {
       lb: { question: 'Fro', history: 'Archiv' },
@@ -105,6 +137,14 @@ export class AppRoot {
 
     return (
       <div class="app-shell">
+        {this.showInstallToast && (
+          <div class="add-to-home-toast show" role="status" aria-live="polite">
+            <span>Installéiert Mir Sinn op ärem Homescreen fir de schnellsten Zougang.</span>
+            <button class="toast-dismiss" type="button" onClick={this.dismissToast} aria-label="Dismiss reminder">
+              ×
+            </button>
+          </div>
+        )}
         <header class="app-header">
           <button class="home-link" onClick={() => this.navigate('/')}>
             <span class="flag" aria-hidden="true">
