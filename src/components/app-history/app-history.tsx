@@ -11,6 +11,7 @@ interface HistoryState {
   loading: boolean;
   errorKey?: HistoryErrorKey;
   questions: QuestionDocument[];
+  expanded: Set<string>;
 }
 
 const LUXEMBOURG_TZ = 'Europe/Luxembourg';
@@ -81,7 +82,7 @@ const totalLabel = (language: LanguageCode, count: number) => {
 })
 export class AppHistory {
   @Prop() language: LanguageCode = 'lb';
-  @State() state: HistoryState = { loading: true, questions: [] };
+  @State() state: HistoryState = { loading: true, questions: [], expanded: new Set<string>() };
 
   private hasFirebase = false;
 
@@ -91,7 +92,7 @@ export class AppHistory {
   }
 
   private async loadHistory() {
-    this.state = { loading: true, questions: [] };
+    this.state = { loading: true, questions: [], expanded: new Set<string>() };
     try {
       const questions = this.hasFirebase
         ? await getRecentQuestions()
@@ -106,6 +107,7 @@ export class AppHistory {
         this.state = {
           loading: false,
           questions: [],
+          expanded: new Set<string>(),
         };
         return;
       }
@@ -113,12 +115,14 @@ export class AppHistory {
       this.state = {
         loading: false,
         questions: filtered,
+        expanded: new Set<string>(),
       };
     } catch (error) {
       console.error(error);
       this.state = {
         loading: false,
         questions: [],
+        expanded: new Set<string>(),
         errorKey: 'load-failed',
       };
     }
@@ -184,48 +188,66 @@ export class AppHistory {
         {this.state.questions.map(question => {
           const key = question.dateKey || question.id;
           const results = this.getResults(question);
+          const expanded = this.state.expanded.has(key);
+          const total = question.results?.totalResponses ?? results.reduce((acc, item) => acc + item.count, 0);
+          const toggle = () => {
+            const expandedSet = new Set(this.state.expanded);
+            if (expandedSet.has(key)) {
+              expandedSet.delete(key);
+            } else {
+              expandedSet.add(key);
+            }
+            this.state = {
+              ...this.state,
+              expanded: expandedSet,
+            };
+          };
           return (
-            <article class="history-card">
-              <header>
-                <span class="date">{formatDateLabel(key, this.language)}</span>
-                <h3>{this.getLocalizedQuestion(question)}</h3>
-              </header>
-              <dl>
-                {results.map(result => (
-                  <div class="result-row">
-                    <dt>{result.label}</dt>
-                    <dd>
-                      <span class="bar">
-                        <span
-                          class="fill"
-                          style={{ width: `${result.percentage}%` }}
-                          aria-hidden="true"
-                        />
-                      </span>
-                      <span class="figures">
-                        <strong>{result.percentage.toFixed(1)}%</strong>
-                        <span class="count">({result.count})</span>
-                      </span>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+            <article class={{'history-card': true, expanded}}>
+              <button class="history-toggle" type="button" onClick={toggle}>
+                <header>
+                  <span class="date">{formatDateLabel(key, this.language)}</span>
+                  <h3>{this.getLocalizedQuestion(question)}</h3>
+                </header>
+                <span class="total-pill">{totalLabel(this.language, total)}</span>
+              </button>
+              <div class={{'history-body': true, open: expanded}}>
+                <dl>
+                  {results.map(result => (
+                    <div class="result-row">
+                      <dt>{result.label}</dt>
+                      <dd>
+                        <span class="bar">
+                          <span
+                            class="fill"
+                            style={{ width: `${result.percentage}%` }}
+                            aria-hidden="true"
+                          />
+                        </span>
+                        <span class="figures">
+                          <strong>{result.percentage.toFixed(1)}%</strong>
+                          <span class="count">({result.count})</span>
+                        </span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
 
-              {question.results?.summary && (
-                <p class="summary">{question.results.summary}</p>
-              )}
+                {question.results?.summary && (
+                  <p class="summary">{question.results.summary}</p>
+                )}
 
-              {question.results?.totalResponses !== undefined && (
-                <footer>
+                <footer class="history-footer">
                   <span class="total">
-                    {totalLabel(this.language, question.results.totalResponses)}
+                    {totalLabel(this.language, total)}
                   </span>
                 </footer>
-              )}
+              </div>
             </article>
           );
         })}
       </div>
     );
   }
+
 }
