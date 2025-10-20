@@ -192,7 +192,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
+  z-index: 600;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.45s ease;
@@ -201,6 +201,12 @@
 .loading-screen--active {
   opacity: 1;
   pointer-events: auto;
+}
+
+.loading-screen--fade-out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
 }
 
 .question-wrapper {

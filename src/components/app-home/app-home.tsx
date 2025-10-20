@@ -280,10 +280,11 @@ export class AppHome {
   private previousPoints: number | null = null;
   private deviceSnapshot: DeviceDocument | null = null;
 
-  async componentWillLoad() {
+  componentWillLoad() {
     this.hasFirebase = Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
-    await this.loadQuestion();
-    this.setupDeviceSubscription();
+    this.loadQuestion().finally(() => {
+      this.setupDeviceSubscription();
+    });
   }
 
   disconnectedCallback() {
@@ -325,6 +326,7 @@ export class AppHome {
           alreadyAnswered: false,
           errorKey: 'missing-question',
         };
+        this.scheduleOverlayRemoval();
         return;
       }
 
@@ -748,42 +750,22 @@ export class AppHome {
     }
 
     const question = this.state.question;
-    if (!question) {
-      return (
-        <div class="question-wrapper">
-          {showOverlay && (
-            <div
-              class={{
-                'loading-screen': true,
-                'loading-screen--active': this.state.loading,
-              }}
-              aria-busy={this.state.loading}
-            >
-              {this.renderLoader()}
-            </div>
-          )}
-          {this.renderPoliciesDialog()}
-        </div>
-      );
-    }
-
     const translations = this.translations;
     const questionText = this.getLocalizedQuestion(question);
     const summaryText = this.getLocalizedSummary(question);
 
     return (
       <div class="question-wrapper">
-        {showOverlay && (
-          <div
-            class={{
-              'loading-screen': true,
-              'loading-screen--active': this.state.loading,
-            }}
-            aria-busy={this.state.loading}
-          >
-            {this.renderLoader()}
-          </div>
-        )}
+        <div
+          class={{
+            'loading-screen': true,
+            'loading-screen--active': showOverlay,
+            'loading-screen--fade-out': this.overlayVisible && !this.state.loading,
+          }}
+          aria-busy={this.state.loading}
+        >
+          {this.renderLoader()}
+        </div>
         <div class={{ 'question-view': true, 'question-view--visible': !this.overlayVisible }}>
         {this.renderConfetti()}
         <section class="card question-card">
@@ -842,7 +824,7 @@ export class AppHome {
         <section class="card about-card">
           <header>
             <span class="about-title">{translations.aboutTitle}</span>
-            <span class="about-version">v0.0.5</span>
+            <span class="about-version">v0.0.6</span>
           </header>
           <p class="about-text">{translations.aboutDescription}</p>
           <footer class="about-footer">
