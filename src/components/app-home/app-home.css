@@ -20,6 +20,78 @@
   gap: 0.5rem;
 }
 
+.points-card header {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.points-title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.points-subtitle {
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.points-value {
+  margin: 0;
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.about-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.about-title {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.about-version {
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.about-text {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(0, 0, 0, 0.65);
+  line-height: 1.5;
+}
+
+.about-footer {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.about-footer a {
+  color: var(--lux-blue);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.about-footer a:hover {
+  text-decoration: underline;
+}
+
 .article-summary {
   margin: 0;
   font-size: 0.95rem;
@@ -183,4 +255,52 @@ button:active {
 .error-card {
   border: 2px solid var(--lux-red);
   background: rgba(237, 41, 57, 0.1);
+}
+
+.confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 50;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -10%;
+  width: 8px;
+  height: 14px;
+  background: var(--lux-red);
+  opacity: 0;
+  transform: translate3d(0, 0, 0);
+  animation-name: confetti-fall;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+}
+
+.confetti-piece:nth-child(3n) {
+  background: var(--lux-blue);
+}
+
+.confetti-piece:nth-child(3n + 1) {
+  background: #f9b233;
+}
+
+.confetti-piece:nth-child(4n) {
+  background: #ff7aa0;
+}
+
+@keyframes confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -20vh, 0) rotate(0deg);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift, 0px), 110vh, 0) rotate(360deg);
+  }
 }

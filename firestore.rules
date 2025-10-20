@@ -11,8 +11,18 @@ service cloud.firestore {
         && request.resource.data.deviceId.size() > 0;
 
       allow update: if request.resource.data.deviceId == deviceId
+        && request.resource.data.deviceId is string
         && resource.data.deviceId == deviceId;
 
+      allow delete: if false;
+    }
+
+    match /shortcodes/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if request.resource.data.deviceId is string
+        && request.resource.data.deviceId.size() > 0
+        && (resource == null || resource.data.deviceId == request.resource.data.deviceId);
       allow delete: if false;
     }
 
@@ -21,7 +31,7 @@ service cloud.firestore {
       allow create, update, delete: if false;
 
       match /answers/{deviceId} {
-        allow get: if resource != null && resource.data.deviceId == deviceId;
+        allow get: if resource == null || resource.data.deviceId == deviceId;
         allow list: if false;
 
         allow create: if request.resource.data.deviceId == deviceId

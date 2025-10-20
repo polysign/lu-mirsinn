@@ -149,7 +149,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  padding: 0.85rem 0.25rem;
+  padding: 0.65rem 0.25rem;
   border: none;
   background: transparent;
   font-size: 0.9rem;
@@ -171,7 +171,15 @@
 }
 
 .nav-icon {
-  font-size: 1.4rem;
+  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-icon img {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 @media (min-width: 768px) {

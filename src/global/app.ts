@@ -1,9 +1,12 @@
 import { ensureDeviceIdOnWindow } from '../services/device';
-import { isFirebaseConfigured } from '../services/firebase';
+import { ensureDeviceDocument, isFirebaseConfigured } from '../services/firebase';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
 const registerServiceWorker = async () => {
   if (!('serviceWorker' in navigator)) return;
+  if (location.hostname === 'localhost' || location.protocol === 'http:') {
+    return;
+  }
   try {
     await navigator.serviceWorker.register('/sw.js');
   } catch (err) {
@@ -22,8 +25,21 @@ const attachFirebaseConfigFlag = () => {
 };
 
 export default async () => {
-  await ensureDeviceIdOnWindow();
   injectFirebaseConfig();
   attachFirebaseConfigFlag();
+  const deviceId = await ensureDeviceIdOnWindow();
+  let ref = null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    ref = params.get('from');
+  } catch {
+    ref = null;
+  }
+  if (isFirebaseConfigured()) {
+    const deviceDoc = await ensureDeviceDocument(deviceId, ref);
+    if (deviceDoc?.shortCode) {
+      (window as any).__DEVICE_SHORT_CODE__ = deviceDoc.shortCode;
+    }
+  }
   registerServiceWorker();
 };

@@ -4,7 +4,9 @@ import {
   getAnswerForDevice,
   getTodayQuestionDoc,
   setAnswer,
+  subscribeToDevice,
   type QuestionDocument,
+  type DeviceDocument,
 } from '../../services/firebase';
 import { fallbackQuestion } from '../../services/mock-data';
 import type { LanguageCode } from '../../types/language';
@@ -41,6 +43,9 @@ const getTodayLabel = (language: LanguageCode) => {
   return formatter.format(new Date());
 };
 
+const LOCAL_POINTS_KEY = 'mir-sinn-points';
+const CONFETTI_PIECES = Array.from({ length: 24 }, (_, index) => index);
+
 const copy: Record<
   LanguageCode,
   {
@@ -60,6 +65,8 @@ const copy: Record<
     submitError: string;
     alreadyAnswered: string;
     shareTextSuffix: string;
+    pointsTitle: string;
+    pointsSubtitle: string;
   }
 > = {
   lb: {
@@ -83,6 +90,8 @@ const copy: Record<
     alreadyAnswered:
       "Dir hutt dës Fro schonn haut beäntwert. Kuckt muer zeréck fir d'Resultater!",
     shareTextSuffix: "Beäntwert d'Fro am Mir Sinn App.",
+    pointsTitle: 'Deng Punkten',
+    pointsSubtitle: '+100 pro Äntwert',
   },
   fr: {
     context:
@@ -109,6 +118,8 @@ const copy: Record<
       "Vous avez déjà répondu à la question d'aujourd'hui. Revenez demain pour voir les résultats !",
     shareTextSuffix:
       "Réponds à la question dans l'application Mir Sinn.",
+    pointsTitle: 'Vos points',
+    pointsSubtitle: '+100 par réponse',
   },
   de: {
     context: 'Deine Stimme zeigt, was Luxemburg denkt.',
@@ -134,6 +145,8 @@ const copy: Record<
       'Sie haben die heutige Frage bereits beantwortet. Schauen Sie morgen wieder vorbei, um die Ergebnisse zu sehen!',
     shareTextSuffix:
       'Beantworte die Frage in der Mir Sinn App.',
+    pointsTitle: 'Deine Punkte',
+    pointsSubtitle: '+100 pro Antwort',
   },
   en: {
     context: 'Your voice helps us understand how Luxembourg thinks.',
@@ -159,6 +172,8 @@ const copy: Record<
       "You already answered today's question. Come back tomorrow to see the results!",
     shareTextSuffix:
       'Answer the question in the Mir Sinn app.',
+    pointsTitle: 'Your points',
+    pointsSubtitle: '+100 per answer',
   },
 };
 
@@ -176,13 +191,32 @@ export class AppHome {
   @State() selectedOption: string | null = null;
   @State() submitting = false;
   @State() shareStatus: 'idle' | 'success' | 'error' = 'idle';
+  @State() points: number | null = null;
+  @State() confettiBurst = false;
 
   private todayKey = getTodayKey();
   private hasFirebase = false;
+  private deviceUnsubscribe?: () => void;
+  private deviceSubscriptionRetry?: number;
+  private confettiTimeout?: number;
+  private previousPoints: number | null = null;
+  private deviceSnapshot: DeviceDocument | null = null;
 
   async componentWillLoad() {
     this.hasFirebase = Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
     await this.loadQuestion();
+    this.setupDeviceSubscription();
+  }
+
+  disconnectedCallback() {
+    this.deviceUnsubscribe?.();
+    if (this.deviceSubscriptionRetry) {
+      window.clearTimeout(this.deviceSubscriptionRetry);
+    }
+    if (this.confettiTimeout) {
+      window.clearTimeout(this.confettiTimeout);
+    }
+    this.deviceSnapshot = null;
   }
 
   @Watch('language')
@@ -200,7 +234,6 @@ export class AppHome {
 
   private async loadQuestion() {
     this.state = { loading: true, alreadyAnswered: false };
-    console.log(this.todayKey);
     try {
       const question = this.hasFirebase
         ? await getTodayQuestionDoc(this.todayKey)
@@ -248,6 +281,9 @@ export class AppHome {
         question,
         alreadyAnswered,
       };
+      if (!this.hasFirebase) {
+        this.loadLocalPoints(false);
+      }
     } catch (error) {
       console.error(error);
       this.state = {
@@ -262,6 +298,32 @@ export class AppHome {
     const select = event.target as HTMLSelectElement;
     this.selectedOption = select.value;
   };
+
+  private setupDeviceSubscription() {
+    if (!this.hasFirebase) {
+      this.loadLocalPoints(false);
+      return;
+    }
+
+    const id = this.deviceId;
+    if (!id) {
+      if (!this.deviceSubscriptionRetry) {
+        this.deviceSubscriptionRetry = window.setTimeout(() => {
+          this.deviceSubscriptionRetry = undefined;
+          this.setupDeviceSubscription();
+        }, 400);
+      }
+      return;
+    }
+
+    this.deviceUnsubscribe?.();
+    this.deviceUnsubscribe = subscribeToDevice(id, (doc: DeviceDocument | null) => {
+      this.deviceSnapshot = doc;
+      const points = doc?.points ?? 0;
+      const shouldAnimate = this.previousPoints !== null;
+      this.handlePointsUpdate(points, shouldAnimate);
+    });
+  }
 
   private getLocalizedQuestion(question: QuestionDocument | undefined) {
     if (!question) return '';
@@ -280,6 +342,83 @@ export class AppHome {
       id: option.id,
       label: option.label[this.language] || option.label.lb,
     }));
+  }
+
+  private getLocalPoints(): number {
+    try {
+      const stored = localStorage.getItem(LOCAL_POINTS_KEY);
+      if (!stored) return 0;
+      const parsed = parseInt(stored, 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private saveLocalPoints(value: number) {
+    try {
+      localStorage.setItem(LOCAL_POINTS_KEY, String(value));
+    } catch {
+      // ignore persistence issues
+    }
+  }
+
+  private loadLocalPoints(animate: boolean) {
+    const points = this.getLocalPoints();
+    this.handlePointsUpdate(points, animate);
+  }
+
+  private handlePointsUpdate(next: number, animate = true) {
+    const previous = this.previousPoints;
+    this.points = next;
+    if (animate && previous !== null && next > previous) {
+      this.launchConfetti();
+    }
+    this.previousPoints = next;
+  }
+
+  private launchConfetti() {
+    if (this.confettiTimeout) {
+      window.clearTimeout(this.confettiTimeout);
+    }
+    this.confettiBurst = false;
+    requestAnimationFrame(() => {
+      this.confettiBurst = true;
+      this.confettiTimeout = window.setTimeout(() => {
+        this.confettiBurst = false;
+      }, 2200);
+    });
+  }
+
+  private renderConfetti() {
+    if (!this.confettiBurst) {
+      return null;
+    }
+    return (
+      <div class="confetti-layer">
+        {CONFETTI_PIECES.map(piece => {
+          const position = (piece / CONFETTI_PIECES.length) * 100;
+          const delay = (piece % 7) * 0.08;
+          const duration = 1.6 + (piece % 5) * 0.12;
+          const drift = (piece % 2 === 0 ? 1 : -1) * (8 + (piece % 6) * 4);
+          const style = {
+            left: `${position}%`,
+            animationDelay: `${delay}s`,
+            animationDuration: `${duration}s`,
+            '--drift': `${drift}px`,
+          } as any;
+          return <span class="confetti-piece" style={style} />;
+        })}
+      </div>
+    );
+  }
+
+  private formatPoints() {
+    if (this.points === null) {
+      return '—';
+    }
+    const locale = this.language === 'lb' ? 'de-LU' : this.language;
+    return this.points.toLocaleString(locale);
   }
 
   private async handleSubmit(event: Event) {
@@ -311,6 +450,10 @@ export class AppHome {
         } catch {
           // ignore local demo storage issues
         }
+        const current = this.points ?? this.getLocalPoints();
+        const next = current + 100;
+        this.saveLocalPoints(next);
+        this.handlePointsUpdate(next);
       }
 
       this.state = {
@@ -333,12 +476,13 @@ export class AppHome {
   private async handleShare() {
     if (!this.state.question) return;
     const translations = this.translations;
+    const shareUrl = this.buildShareUrl();
     const shareData = {
       title: 'Mir Sinn - Fro vum Dag',
       text: `${this.getLocalizedQuestion(
         this.state.question,
       )}\n\n${translations.shareTextSuffix}`,
-      url: window.location.href,
+      url: shareUrl,
     };
 
     if (navigator.share) {
@@ -361,6 +505,38 @@ export class AppHome {
       console.warn('Fallback share failed', err);
       this.shareStatus = 'error';
     }
+  }
+
+  private buildShareUrl() {
+    const baseUrl = `${window.location.origin}${window.location.pathname}`;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('from');
+
+    const shortCode = this.latestShortCode();
+    if (shortCode) {
+      params.set('from', shortCode);
+    }
+
+    const query = params.toString();
+    return query ? `${baseUrl}?${query}` : baseUrl;
+  }
+
+  private latestShortCode(): string | null {
+    if (this.deviceSnapshot?.shortCode) {
+      return this.deviceSnapshot.shortCode;
+    }
+    const windowCode = (window as any).__DEVICE_SHORT_CODE__;
+    if (typeof windowCode === 'string' && windowCode.length > 0) {
+      return windowCode;
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ownCode = params.get('from');
+      if (ownCode) return ownCode;
+    } catch {
+      // ignore parse errors
+    }
+    return null;
   }
 
   private renderLoader() {
@@ -455,6 +631,7 @@ export class AppHome {
 
     return (
       <div class="question-view">
+        {this.renderConfetti()}
         <section class="card question-card">
           <header>
             <span class="meta">{getTodayLabel(this.language)}</span>
@@ -487,6 +664,31 @@ export class AppHome {
           <button class="link-button" type="button" onClick={() => Router.push('/history')}>
             {translations.historyLink}
           </button>
+        </section>
+
+        <section class="card points-card">
+          <header>
+            <span class="points-title">{translations.pointsTitle}</span>
+            <span class="points-subtitle">{translations.pointsSubtitle}</span>
+          </header>
+          <p class="points-value">{this.formatPoints()}</p>
+        </section>
+
+        <section class="card about-card">
+          <header>
+            <span class="about-title">Mir Sinn</span>
+            <span class="about-version">v0.0.1</span>
+          </header>
+          <p class="about-text">
+            Mir Sinn ass eng Initiativ fir d'Meenung vu Lëtzebuerg ze sammelen.
+            Dréit all Dag bäi a entdeckt, wat d'Gemeinschaft denkt.
+          </p>
+          <footer class="about-footer">
+            <span class="about-built">Built by</span>
+            <a href="https://autonoma.lu" target="_blank" rel="noopener">
+              Autonoma.lu
+            </a>
+          </footer>
         </section>
       </div>
     );

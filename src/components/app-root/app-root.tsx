@@ -3,6 +3,8 @@ import { Router } from '../../';
 import { Route } from 'stencil-router-v2';
 import type { LanguageCode } from '../../types/language';
 import globeIcon from '../../assets/icons/regular/globe-simple.svg';
+import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
+import archiveIcon from '../../assets/icons/regular/archive.svg';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -109,7 +111,9 @@ export class AppRoot {
             onClick={() => this.navigate('/')}
             aria-label="Question of the day"
           >
-            <span class="nav-icon">❓</span>
+            <span class="nav-icon">
+              <img src={sealQuestionIcon} alt="" />
+            </span>
             <span>{labels.question}</span>
           </button>
           <button
@@ -120,7 +124,9 @@ export class AppRoot {
             onClick={() => this.navigate('/history')}
             aria-label="Previous questions"
           >
-            <span class="nav-icon">🗂️</span>
+            <span class="nav-icon">
+              <img src={archiveIcon} alt="" />
+            </span>
             <span>{labels.history}</span>
           </button>
         </nav>
