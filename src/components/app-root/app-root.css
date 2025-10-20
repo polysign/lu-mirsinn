@@ -1,12 +1,14 @@
 :host {
   position: relative;
   display: block;
+  --header-height: 72px;
+  --nav-height: 70px;
 }
 
 .add-to-home-toast {
   position: fixed;
   left: 50%;
-  bottom: 1.5rem;
+  bottom: calc(var(--nav-height) + 1rem);
   transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.85);
   color: #fff;
@@ -33,8 +35,6 @@
   min-height: 100vh;
   background: var(--app-surface, #f7f9fb);
   color: var(--app-text, #1b1b1f);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
 }
 
 .app-header {
@@ -45,9 +45,12 @@
   background: #f0f3f8;
   color: var(--app-text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 100;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  min-height: var(--header-height);
 }
 
 .home-link {
@@ -160,12 +163,12 @@
 }
 
 .app-content {
-  padding: 1rem;
+  padding: calc(var(--header-height) + 1rem) 1rem calc(var(--nav-height) + 1rem);
   overflow-y: auto;
 }
 
 .app-nav {
-  position: sticky;
+  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
@@ -174,6 +177,8 @@
   border-top: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
+  min-height: var(--nav-height);
+  z-index: 150;
 }
 
 .nav-button {

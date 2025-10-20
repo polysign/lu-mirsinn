@@ -120,12 +120,15 @@
 
 .dialog-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 500;
   padding: 2rem 1rem;
 }
 
@@ -190,8 +193,18 @@
   align-items: center;
   justify-content: center;
   z-index: 200;
-  animation: fadeOut 0.4s ease forwards;
-  animation-delay: 0.2s;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+
+.loading-screen--active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.question-wrapper {
+  position: relative;
 }
 
 .question-view {
@@ -203,6 +216,7 @@
 
 .question-view--visible {
   opacity: 1;
+  transform: none;
 }
 
 .page-loader {
@@ -255,16 +269,6 @@
   }
 }
 
-@keyframes fadeOut {
-  0% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    pointer-events: none;
-    visibility: hidden;
-  }
-}
 
 .article-summary {
   margin: 0;
@@ -365,6 +369,12 @@ button:active {
 .action-icon img {
   width: 1.2rem;
   height: 1.2rem;
+}
+
+.share-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: rgba(0, 0, 0, 0.55);
 }
 
 .link-button {

@@ -17,6 +17,13 @@ const languages: Array<{ code: LanguageCode; label: string }> = [
 
 const LANGUAGE_STORAGE_KEY = 'mir-sinn-lang';
 
+const installCopy: Record<LanguageCode, string> = {
+  lb: 'Installéiert Mir Sinn op ärem Homescreen fir de schnellsten Zougang.',
+  fr: "Ajoute Mir Sinn à ton écran d'accueil pour un accès rapide.",
+  de: 'Füge Mir Sinn deinem Homescreen hinzu für den schnellsten Zugriff.',
+  en: 'Add Mir Sinn to your homescreen for the quickest access.',
+};
+
 @Component({
   tag: 'app-root',
   styleUrls: ['app-root.css'],
@@ -144,7 +151,7 @@ export class AppRoot {
       <div class="app-shell">
         {this.showInstallToast && (
           <div class="add-to-home-toast show" role="status" aria-live="polite">
-            <span>Installéiert Mir Sinn op ärem Homescreen fir de schnellsten Zougang.</span>
+            <span>{installCopy[this.language] || installCopy.lb}</span>
             <button class="toast-dismiss" type="button" onClick={this.dismissToast} aria-label="Dismiss reminder">
               ×
             </button>
