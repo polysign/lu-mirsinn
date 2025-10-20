@@ -2,6 +2,7 @@ import { Component, State, h } from '@stencil/core';
 import { Router } from '../../';
 import { Route } from 'stencil-router-v2';
 import type { LanguageCode } from '../../types/language';
+import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -49,6 +50,14 @@ export class AppRoot {
   };
 
   render() {
+    const navLabels: Record<LanguageCode, { question: string; history: string }> = {
+      lb: { question: 'Fro', history: 'Archiv' },
+      fr: { question: 'Question', history: 'Historique' },
+      de: { question: 'Frage', history: 'Verlauf' },
+      en: { question: 'Question', history: 'History' },
+    };
+    const labels = navLabels[this.language] || navLabels.lb;
+
     return (
       <div class="app-shell">
         <header class="app-header">
@@ -65,15 +74,18 @@ export class AppRoot {
           </button>
           <label class="language-picker">
             <span class="language-label" aria-hidden="true">
-              🌍
+              <img src={globeIcon} alt="" />
             </span>
-            <select onInput={this.handleLanguageChange} aria-label="Select language">
-              {languages.map(lang => (
-                <option value={lang.code} selected={this.language === lang.code}>
-                  {lang.label}
-                </option>
-              ))}
-            </select>
+            <div class="language-select">
+              <span class="language-select__current">{this.language.toUpperCase()}</span>
+              <select onInput={this.handleLanguageChange} aria-label="Select language">
+                {languages.map(lang => (
+                  <option value={lang.code} selected={this.language === lang.code}>
+                    {lang.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </label>
         </header>
 
@@ -98,7 +110,7 @@ export class AppRoot {
             aria-label="Question of the day"
           >
             <span class="nav-icon">❓</span>
-            <span>Question</span>
+            <span>{labels.question}</span>
           </button>
           <button
             class={{
@@ -109,7 +121,7 @@ export class AppRoot {
             aria-label="Previous questions"
           >
             <span class="nav-icon">🗂️</span>
-            <span>History</span>
+            <span>{labels.history}</span>
           </button>
         </nav>
       </div>

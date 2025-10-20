@@ -268,6 +268,12 @@ export class AppHome {
     return question.question[this.language] || question.question.lb;
   }
 
+  private getLocalizedSummary(question: QuestionDocument | undefined) {
+    const summary = question?.article?.summary;
+    if (!summary) return '';
+    return summary[this.language] || summary.lb || summary.en || '';
+  }
+
   private getLocalizedOptions(question: QuestionDocument | undefined) {
     if (!question) return [];
     return question.options.map(option => ({
@@ -445,12 +451,14 @@ export class AppHome {
 
     const translations = this.translations;
     const questionText = this.getLocalizedQuestion(question);
+    const summaryText = this.getLocalizedSummary(question);
 
     return (
       <div class="question-view">
         <section class="card question-card">
           <header>
             <span class="meta">{getTodayLabel(this.language)}</span>
+            {summaryText && <p class="article-summary">{summaryText}</p>}
             <h2>{questionText}</h2>
           </header>
           <p class="context">

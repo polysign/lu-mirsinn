@@ -26,6 +26,13 @@ export interface QuestionDocument {
   dateKey: string;
   question: LocalizedText;
   options: QuestionOption[];
+  article?: {
+    title?: string;
+    url?: string;
+    summary?: LocalizedText | null;
+    comments?: number;
+  };
+  analysis?: LocalizedText | null;
   results?: {
     totalResponses?: number;
     perOption?: Record<string, number>;
