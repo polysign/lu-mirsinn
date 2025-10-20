@@ -4,7 +4,8 @@ import { registerMessagingForDevice } from '../services/messaging';
 import { initAnalytics, logAnalyticsEvent } from '../services/analytics';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
-let swRefreshQueued = false;
+let shouldReloadOnControllerChange = false;
+let reloadHandled = false;
 
 const registerServiceWorker = async () => {
   if (!('serviceWorker' in navigator)) return;
@@ -16,6 +17,7 @@ const registerServiceWorker = async () => {
 
     const triggerSkipWaiting = (worker: ServiceWorker | null) => {
       if (worker && worker.state === 'installed' && navigator.serviceWorker.controller) {
+        shouldReloadOnControllerChange = true;
         worker.postMessage({ type: 'SKIP_WAITING' });
       }
     };
@@ -31,8 +33,10 @@ const registerServiceWorker = async () => {
     });
 
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (swRefreshQueued) return;
-      swRefreshQueued = true;
+      if (!shouldReloadOnControllerChange || reloadHandled) {
+        return;
+      }
+      reloadHandled = true;
       window.location.reload();
     });
   } catch (err) {
