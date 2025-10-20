@@ -480,3 +480,65 @@ exports.sendQuestionNotifications = onSchedule(
     return runDailyNotificationJob();
   },
 );
+
+async function refreshHistoricalStats() {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dateKey = getLuxDateKey(yesterday);
+
+  const questionRef = db.doc(`questions/${dateKey}`);
+  const questionSnap = await questionRef.get();
+  if (!questionSnap.exists) {
+    logger.warn('No question document found for stats refresh', {dateKey});
+    return 'missing_question';
+  }
+
+  const answersSnap = await db.collection(`questions/${dateKey}/answers`).get();
+  if (answersSnap.empty) {
+    logger.info('No answers found for question', {dateKey});
+    await questionRef.set({
+      results: {
+        totalResponses: 0,
+        perOption: {},
+        breakdown: [],
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    }, {merge: true});
+    return 'no_answers';
+  }
+
+  const perOption = {};
+  answersSnap.forEach(docSnap => {
+    const data = docSnap.data();
+    const optionId = data.optionId;
+    if (!optionId) return;
+    perOption[optionId] = (perOption[optionId] || 0) + 1;
+  });
+
+  const totalResponses = Object.values(perOption).reduce((sum, value) => sum + value, 0);
+  const breakdown = Object.entries(perOption).map(([optionId, count]) => ({
+    optionId,
+    count,
+    percentage: totalResponses ? Math.round((count / totalResponses) * 1000) / 10 : 0,
+  }));
+
+  await questionRef.set({
+    results: {
+      totalResponses,
+      perOption,
+      breakdown,
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+    },
+  }, {merge: true});
+
+  logger.info('Historical stats refreshed', {dateKey, totalResponses});
+  return {status: 'updated', totalResponses};
+}
+
+exports.refreshYesterdayStats = onSchedule(
+  {
+    schedule: '0 * * * *',
+    timeZone: LUX_TZ,
+  },
+  async () => refreshHistoricalStats(),
+);
