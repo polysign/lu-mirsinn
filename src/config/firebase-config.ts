@@ -22,7 +22,7 @@ export const firebaseConfig: FirebaseClientConfig = {
   messagingSenderId: "102516593827",
   appId: "1:102516593827:web:3c12cf92ebf18fae3cdb16",
   measurementId: "G-3EKKDNTBTH",
-  vapidKey: ""
+  vapidKey: "BDnYY10QQZtxqvazQYz5NjSbAEHUMwv_vQj9YxE5biPrMywkj6TY6pGAgfG75AvVhoGrqjamzoIsC8zHX0BjpvM"
 };
 
 export const hasFirebaseConfig = () =>

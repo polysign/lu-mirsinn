@@ -9,9 +9,15 @@ import { LanguageCode } from "./types/language";
 export { LanguageCode } from "./types/language";
 export namespace Components {
     interface AppHistory {
+        /**
+          * @default 'lb'
+         */
         "language": LanguageCode;
     }
     interface AppHome {
+        /**
+          * @default 'lb'
+         */
         "language": LanguageCode;
     }
     interface AppRoot {
@@ -44,9 +50,15 @@ declare global {
 }
 declare namespace LocalJSX {
     interface AppHistory {
+        /**
+          * @default 'lb'
+         */
         "language"?: LanguageCode;
     }
     interface AppHome {
+        /**
+          * @default 'lb'
+         */
         "language"?: LanguageCode;
     }
     interface AppRoot {

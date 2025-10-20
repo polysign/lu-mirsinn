@@ -12,3 +12,11 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 firebase.messaging();
+
+const messaging = firebase.messaging();
+messaging.onBackgroundMessage(payload => {
+  self.registration.showNotification(payload.notification.title, {
+    body: payload.notification.body,
+    icon: '/assets/icon/mir-sinn-icon-192.png',
+  });
+});

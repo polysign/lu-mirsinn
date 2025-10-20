@@ -9,13 +9,14 @@ export const config: Config = {
   outputTargets: [
     {
       type: 'www',
+      empty: true,
       serviceWorker: {
         swSrc: 'src/sw.js',
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
       },
       baseUrl: 'https://mir-sinn.lu/',
       copy: [
-        { src: 'firebase-messaging-sw.js', dest: 'firebase-messaging-sw.js' },
+        { src: 'firebase-messaging-sw.js', dest: 'messaging-sw.js' },
       ],
     },
   ],

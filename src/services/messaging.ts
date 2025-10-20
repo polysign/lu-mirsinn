@@ -21,7 +21,7 @@ const ensureMessagingRegistration = async () => {
   if (!registrationPromise) {
     registrationPromise = (async () => {
       try {
-        return await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+        return await navigator.serviceWorker.register('/messaging-sw.js', {
           scope: '/',
         });
       } catch (err) {

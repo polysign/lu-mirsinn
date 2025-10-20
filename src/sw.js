@@ -3,7 +3,7 @@ importScripts('https://storage.googleapis.com/workbox-cdn/releases/4.3.1/workbox
 if (workbox) {
   workbox.setConfig({ debug: false });
 
-  workbox.precaching.precacheAndRoute([]);
+  workbox.precaching.precacheAndRoute(self.__WB_MANIFEST || []);
   workbox.precaching.cleanupOutdatedCaches();
 
   workbox.routing.registerRoute(
