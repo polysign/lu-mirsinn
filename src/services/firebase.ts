@@ -119,16 +119,21 @@ export async function getTodayQuestionDoc(dateKey: string): Promise<QuestionDocu
   if (!db) {
     return null;
   }
-  const ref = doc(db, 'questions', dateKey);
-  const snapshot = await getDoc(ref);
-  if (!snapshot.exists()) {
+  try {
+    const ref = doc(db, 'questions', dateKey);
+    const snapshot = await getDoc(ref);
+    if (!snapshot.exists()) {
+      return null;
+    }
+    return {
+      ...(snapshot.data() as Omit<QuestionDocument, 'id'>),
+      id: snapshot.id,
+      dateKey,
+    };
+  } catch (error) {
+    console.warn('[firebase] Failed to load question', error);
     return null;
   }
-  return {
-    ...(snapshot.data() as Omit<QuestionDocument, 'id'>),
-    id: snapshot.id,
-    dateKey,
-  };
 }
 
 export async function setAnswer(
@@ -148,14 +153,19 @@ export async function getAnswerForDevice(
 ): Promise<AnswerDocument | null> {
   const db = ensureFirestore();
   if (!db) return null;
-  const answerRef = doc(db, 'questions', dateKey, 'answers', deviceId);
-  const snapshot = await getDoc(answerRef);
-  if (!snapshot.exists()) return null;
-  const data = snapshot.data();
-  return {
-    ...(data as AnswerDocument),
-    deviceId,
-  };
+  try {
+    const answerRef = doc(db, 'questions', dateKey, 'answers', deviceId);
+    const snapshot = await getDoc(answerRef);
+    if (!snapshot.exists()) return null;
+    const data = snapshot.data();
+    return {
+      ...(data as AnswerDocument),
+      deviceId,
+    };
+  } catch (error) {
+    console.warn('[firebase] No existing answer or access denied', error);
+    return null;
+  }
 }
 
 const parseDateKey = (key: string) => {
@@ -169,21 +179,26 @@ export async function getRecentQuestions(limitCount = 14): Promise<QuestionDocum
   if (!db) {
     return [];
   }
-  const snapshot = await getDocs(collection(db, 'questions'));
-  const docs = snapshot.docs.map(docSnap => {
-    const data = docSnap.data() as Omit<QuestionDocument, 'id'>;
-    const dateKey = (data as any).dateKey || docSnap.id;
-    return {
-      ...data,
-      id: docSnap.id,
-      dateKey,
-    };
-  });
-  return docs
-    .sort(
-      (a, b) =>
-        parseDateKey((b as any).dateKey || b.id) -
-        parseDateKey((a as any).dateKey || a.id),
-    )
-    .slice(0, limitCount);
+  try {
+    const snapshot = await getDocs(collection(db, 'questions'));
+    const docs = snapshot.docs.map(docSnap => {
+      const data = docSnap.data() as Omit<QuestionDocument, 'id'>;
+      const dateKey = (data as any).dateKey || docSnap.id;
+      return {
+        ...data,
+        id: docSnap.id,
+        dateKey,
+      };
+    });
+    return docs
+      .sort(
+        (a, b) =>
+          parseDateKey((b as any).dateKey || b.id) -
+          parseDateKey((a as any).dateKey || a.id),
+      )
+      .slice(0, limitCount);
+  } catch (error) {
+    console.warn('[firebase] Failed to load questions list', error);
+    return [];
+  }
 }

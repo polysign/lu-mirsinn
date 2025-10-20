@@ -8,7 +8,7 @@
  */
 
 const {setGlobalOptions} = require("firebase-functions/v2");
-const {logger} = require("firebase-functions/logger");
+const logger = require("firebase-functions/logger");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onRequest} = require("firebase-functions/v2/https");
 const {defineSecret, defineString} = require("firebase-functions/params");
@@ -266,6 +266,7 @@ exports.generateQuestionOfTheDayOnDemand = onRequest(
       const result = await runDailyQuestionJob();
       res.json({status: result});
     } catch (error) {
+      console.log({error});
       logger.error("Failed to generate question", error);
       res.status(500).json({error: error.message});
     }

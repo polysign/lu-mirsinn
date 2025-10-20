@@ -200,6 +200,7 @@ export class AppHome {
 
   private async loadQuestion() {
     this.state = { loading: true, alreadyAnswered: false };
+    console.log(this.todayKey);
     try {
       const question = this.hasFirebase
         ? await getTodayQuestionDoc(this.todayKey)
