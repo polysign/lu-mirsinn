@@ -270,6 +270,7 @@ export class AppHome {
   @State() points: number | null = null;
   @State() confettiBurst = false;
   @State() showPolicies = false;
+  @State() overlayVisible = true;
 
   private todayKey = getTodayKey();
   private hasFirebase = false;
@@ -312,6 +313,7 @@ export class AppHome {
 
   private async loadQuestion() {
     this.state = { loading: true, alreadyAnswered: false };
+    this.overlayVisible = true;
     try {
       const question = this.hasFirebase
         ? await getTodayQuestionDoc(this.todayKey)
@@ -367,6 +369,7 @@ export class AppHome {
       if (!this.hasFirebase) {
         this.loadLocalPoints(false);
       }
+      this.scheduleOverlayRemoval();
     } catch (error) {
       console.error(error);
       this.state = {
@@ -374,6 +377,7 @@ export class AppHome {
         alreadyAnswered: false,
         errorKey: 'load-failed',
       };
+      this.scheduleOverlayRemoval();
     }
   }
 
@@ -508,6 +512,15 @@ export class AppHome {
     }
     const locale = this.language === 'lb' ? 'de-LU' : this.language;
     return this.points.toLocaleString(locale);
+  }
+
+  private scheduleOverlayRemoval() {
+    if (!this.overlayVisible) return;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        this.overlayVisible = false;
+      }, 450);
+    });
   }
 
   private async handleSubmit(event: Event) {
@@ -728,13 +741,7 @@ export class AppHome {
   }
 
   render() {
-    if (this.state.loading) {
-      return (
-        <div class="loading-screen" aria-busy="true">
-          {this.renderLoader()}
-        </div>
-      );
-    }
+    const showOverlay = this.state.loading || this.overlayVisible;
 
     if (this.state.errorKey) {
       return this.renderError(this.state.errorKey);
@@ -742,7 +749,22 @@ export class AppHome {
 
     const question = this.state.question;
     if (!question) {
-      return null;
+      return (
+        <div class="question-wrapper">
+          {showOverlay && (
+            <div
+              class={{
+                'loading-screen': true,
+                'loading-screen--active': this.state.loading,
+              }}
+              aria-busy={this.state.loading}
+            >
+              {this.renderLoader()}
+            </div>
+          )}
+          {this.renderPoliciesDialog()}
+        </div>
+      );
     }
 
     const translations = this.translations;
@@ -750,7 +772,19 @@ export class AppHome {
     const summaryText = this.getLocalizedSummary(question);
 
     return (
-      <div class={{ 'question-view': true, 'question-view--visible': true }}>
+      <div class="question-wrapper">
+        {showOverlay && (
+          <div
+            class={{
+              'loading-screen': true,
+              'loading-screen--active': this.state.loading,
+            }}
+            aria-busy={this.state.loading}
+          >
+            {this.renderLoader()}
+          </div>
+        )}
+        <div class={{ 'question-view': true, 'question-view--visible': !this.overlayVisible }}>
         {this.renderConfetti()}
         <section class="card question-card">
           <header>
@@ -773,6 +807,15 @@ export class AppHome {
               <img src={megaphoneIcon} alt="" />
             </span>
           </button>
+          <p class="share-note">
+            {this.language === 'fr'
+              ? 'Chaque nouveau visiteur via ton lien te rapporte +5 points.'
+              : this.language === 'de'
+              ? 'Jeder neue Besuch über deinen Link bringt dir +5 Punkte.'
+              : this.language === 'en'
+              ? 'Each friend visiting through your link gives you +5 points.'
+              : 'All Visitte vun dengem Link bréngen der +5 Punkten.'}
+          </p>
           {this.shareStatus === 'success' && (
             <p class="share-feedback">{translations.shareSuccess}</p>
           )}
@@ -799,7 +842,7 @@ export class AppHome {
         <section class="card about-card">
           <header>
             <span class="about-title">{translations.aboutTitle}</span>
-            <span class="about-version">v0.0.4</span>
+            <span class="about-version">v0.0.5</span>
           </header>
           <p class="about-text">{translations.aboutDescription}</p>
           <footer class="about-footer">
@@ -817,6 +860,7 @@ export class AppHome {
             </button>
           </footer>
         </section>
+        </div>
         {this.renderPoliciesDialog()}
       </div>
     );
