@@ -67,7 +67,7 @@ function getModelName() {
   return OPENAI_MODEL.value() || "gpt-4.1-mini";
 }
 
-function extractTopArticle(listingHtml) {
+function extractTopArticle(listingHtml, exclude = { urls: new Set(), titles: new Set() }) {
   const $ = cheerio.load(listingHtml);
   const candidates = [];
 
@@ -89,18 +89,30 @@ function extractTopArticle(listingHtml) {
     logger.warn("No comment-rich articles found, falling back to first article.");
     const fallback = $("div.card a[href*='/a/']").first();
     if (fallback.length) {
-      return {
+      const fallbackArticle = {
         url: normalizeUrl(fallback.attr("href")),
         title: fallback.text().trim(),
         summary: fallback.closest("div.card").find(".card__summary").text().trim(),
         comments: 0,
       };
+      if (!isArticleExcluded(fallbackArticle, exclude)) {
+        return fallbackArticle;
+      }
     }
     return null;
   }
 
   candidates.sort((a, b) => b.comments - a.comments);
-  return candidates[0];
+  const selected = candidates.find(article => !isArticleExcluded(article, exclude));
+  return selected || candidates[0];
+}
+
+function isArticleExcluded(article, exclude) {
+  const url = (article.url || '').toLowerCase();
+  const title = (article.title || '').toLowerCase();
+  if (url && exclude.urls.has(url)) return true;
+  if (title && exclude.titles.has(title)) return true;
+  return false;
 }
 
 function getLuxDateKey(date = new Date()) {
@@ -142,6 +154,7 @@ Requirements:
 - Use simple apostrophes (') and ASCII characters wherever possible.
 - The question should directly relate to the article's core issue and be suitable for a quick opinion poll.
 - The analysis should briefly explain why the question matters today.
+- You must not reuse topics that overlap with the recent articles listed in [recent_articles]. Select a different subject if necessary.
 
 Respond with JSON only, without explanations or code fences.`;
 
@@ -149,7 +162,7 @@ Respond with JSON only, without explanations or code fences.`;
     {role: "system", content: "You are an assistant that turns RTL.lu articles into multilingual daily poll questions. You must respond with valid JSON only."},
     {
       role: "user",
-      content: `${prompt}\n\n[listing_html]\n${listingHtml}\n\n[selected_article_html]\n${articleHtml}\n\n[context]\n${JSON.stringify(context)}`,
+      content: `${prompt}\n\n[listing_html]\n${listingHtml}\n\n[selected_article_html]\n${articleHtml}\n\n[recent_articles]\n${JSON.stringify(context.recentArticles || [])}\n\n[context]\n${JSON.stringify(context)}`,
     },
   ];
 
@@ -210,6 +223,34 @@ function buildQuestionDocument(payload, articleMeta, dateKey, model) {
   };
 }
 
+async function fetchRecentArticles(currentDateKey, days = 3) {
+  const articles = [];
+  const now = new Date();
+
+  for (let i = 1; i <= days; i += 1) {
+    const past = new Date(now);
+    past.setDate(past.getDate() - i);
+    const dateKey = getLuxDateKey(past);
+    if (dateKey === currentDateKey) continue;
+
+    try {
+      const docSnap = await db.doc(`questions/${dateKey}`).get();
+      if (!docSnap.exists) continue;
+      const data = docSnap.data() || {};
+      const article = data.article || {};
+      articles.push({
+        dateKey,
+        title: article.title || null,
+        url: article.url || null,
+      });
+    } catch (error) {
+      logger.warn('Failed to fetch historical question', { dateKey, error: error.message });
+    }
+  }
+
+  return articles;
+}
+
 async function runDailyQuestionJob() {
   const openaiClient = getOpenAIClient();
   const model = getModelName();
@@ -221,8 +262,14 @@ async function runDailyQuestionJob() {
     return "already_exists";
   }
 
+  const recentArticles = await fetchRecentArticles(dateKey, 3);
+  const exclusion = {
+    urls: new Set(recentArticles.map(item => (item.url || '').toLowerCase()).filter(Boolean)),
+    titles: new Set(recentArticles.map(item => (item.title || '').toLowerCase()).filter(Boolean)),
+  };
+
   const listingHtml = await fetchHtml(RTL_NEWS_URL);
-  const topArticle = extractTopArticle(listingHtml);
+  const topArticle = extractTopArticle(listingHtml, exclusion);
   if (!topArticle) {
     throw new Error("No suitable article found on listing page");
   }
@@ -233,6 +280,7 @@ async function runDailyQuestionJob() {
     listingUrl: RTL_NEWS_URL,
     article: topArticle,
     dateKey,
+    recentArticles,
   }, openaiClient, model);
 
   if (!payload?.question || !payload?.options?.length) {
