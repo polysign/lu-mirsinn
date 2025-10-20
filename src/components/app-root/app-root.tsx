@@ -71,6 +71,16 @@ export class AppRoot {
   private navigate = (path: string) => {
     Router.push(path);
     this.currentPath = path;
+    try {
+      const scrollTarget = document.querySelector('.question-wrapper') || window;
+      if ('scrollTo' in scrollTarget) {
+        (scrollTarget as any).scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } catch {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   private readStoredLanguage(): LanguageCode | null {
