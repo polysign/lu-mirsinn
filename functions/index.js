@@ -21,6 +21,7 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+const messaging = admin.messaging();
 const LUX_TZ = "Europe/Luxembourg";
 const RTL_NEWS_URL = "https://www.rtl.lu/news/national";
 
@@ -146,7 +147,11 @@ Requirements:
     {"id": "yes", "label": {"lb": "...", "fr": "...", "de": "...", "en": "..."}},
     {"id": "no", "label": {"lb": "...", "fr": "...", "de": "...", "en": "..."}}
   ],
-  "analysis": {"lb": "...", "fr": "...", "de": "...", "en": "..."}
+  "analysis": {"lb": "...", "fr": "...", "de": "...", "en": "..."},
+  "notification": {
+    "title": {"lb": "...", "fr": "...", "de": "...", "en": "..."},
+    "body": {"lb": "...", "fr": "...", "de": "...", "en": "..."}
+  }
 }
 - Provide 2 to 4 answer options with short, neutral phrasings.
 - Keep each text under 200 characters.
@@ -209,6 +214,7 @@ function buildQuestionDocument(payload, articleMeta, dateKey, model) {
       comments: articleMeta.comments,
     },
     analysis: payload.analysis || null,
+    notification: payload.notification || null,
     results: {
       totalResponses: 0,
       perOption,
@@ -301,7 +307,7 @@ exports.generateQuestionOfTheDay = onSchedule(
     secrets: [OPENAI_API_KEY],
   },
   async () => {
-    return runDailyQuestionJob();
+  return runDailyQuestionJob();
   },
 );
 
@@ -318,5 +324,159 @@ exports.generateQuestionOfTheDayOnDemand = onRequest(
       logger.error("Failed to generate question", error);
       res.status(500).json({error: error.message});
     }
+  },
+);
+
+const SUPPORTED_LANGUAGES = ["lb", "fr", "de", "en"];
+
+function normaliseLanguage(language) {
+  if (!language) return "lb";
+  const normalized = language.toLowerCase();
+  return SUPPORTED_LANGUAGES.includes(normalized) ? normalized : "lb";
+}
+
+function getNotificationCopy(questionDoc, lang) {
+  const language = normaliseLanguage(lang);
+  const title =
+    questionDoc.notification?.title?.[language] ??
+    questionDoc.notification?.title?.lb ??
+    questionDoc.question?.[language] ??
+    questionDoc.question?.lb ??
+    "Mir Sinn";
+
+  const body =
+    questionDoc.notification?.body?.[language] ??
+    questionDoc.analysis?.[language] ??
+    questionDoc.article?.summary?.[language] ??
+    questionDoc.question?.[language] ??
+    questionDoc.question?.lb ??
+    "Respond to Mir Sinn's question of the day.";
+
+  return {title, body};
+}
+
+function chunk(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function sendNotificationsForQuestion(dateKey, questionDoc) {
+  const snapshot = await db.collection("devices").where("fcmToken", "!=", null).get();
+  if (snapshot.empty) {
+    logger.info("No devices with tokens found; skipping campaign.");
+    return 0;
+  }
+
+  const devices = [];
+  snapshot.forEach(docSnap => {
+    const data = docSnap.data() || {};
+    const token = data.fcmToken;
+    if (!token) return;
+    devices.push({
+      id: docSnap.id,
+      token,
+      language: normaliseLanguage(data.language),
+    });
+  });
+
+  if (!devices.length) {
+    logger.info("No usable tokens after filtering.");
+    return 0;
+  }
+
+  let failures = 0;
+  let successes = 0;
+
+  const buckets = new Map();
+  for (const device of devices) {
+    if (!buckets.has(device.language)) {
+      buckets.set(device.language, []);
+    }
+    buckets.get(device.language).push(device);
+  }
+
+  for (const [language, entries] of buckets.entries()) {
+    const {title, body} = getNotificationCopy(questionDoc, language);
+    const chunks = chunk(entries, 500);
+
+    for (const deviceChunk of chunks) {
+      const tokens = deviceChunk.map(entry => entry.token);
+      const message = {
+        tokens,
+        notification: {
+          title,
+          body,
+        },
+        data: {
+          dateKey,
+          language,
+        },
+      };
+
+      try {
+        const response = await messaging.sendMulticast(message);
+        successes += response.successCount;
+        failures += response.failureCount;
+
+        const cleanupWrites = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            const deviceEntry = deviceChunk[idx];
+            const code = resp.error?.code || "";
+            if (
+              code.includes("messaging/invalid-registration-token") ||
+              code.includes("messaging/registration-token-not-registered")
+            ) {
+              const ref = db.doc(`devices/${deviceEntry.id}`);
+              cleanupWrites.push(ref.set({fcmToken: null}, {merge: true}));
+            }
+          }
+        });
+
+        if (cleanupWrites.length) {
+          await Promise.allSettled(cleanupWrites);
+        }
+      } catch (error) {
+        failures += deviceChunk.length;
+        logger.error("Failed to send notifications to chunk", {
+          language,
+          count: deviceChunk.length,
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  logger.info("Notification dispatch completed", {successes, failures});
+  return successes;
+}
+
+async function runDailyNotificationJob() {
+  const dateKey = getLuxDateKey();
+  const questionSnap = await db.doc(`questions/${dateKey}`).get();
+  if (!questionSnap.exists) {
+    logger.warn("No question available for notifications", {dateKey});
+    return "missing_question";
+  }
+  const questionDoc = questionSnap.data() || {};
+  if (!questionDoc.notification) {
+    logger.warn("Question missing notification payload, skipping notification job", {dateKey});
+    return "missing_notification_payload";
+  }
+
+  const sentCount = await sendNotificationsForQuestion(dateKey, questionDoc);
+  return {status: "sent", sentCount};
+}
+
+exports.sendQuestionNotifications = onSchedule(
+  {
+    schedule: "0 8 * * *",
+    timeZone: LUX_TZ,
+  },
+  async () => {
+    return runDailyNotificationJob();
   },
 );

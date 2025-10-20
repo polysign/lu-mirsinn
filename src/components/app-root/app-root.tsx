@@ -5,6 +5,7 @@ import type { LanguageCode } from '../../types/language';
 import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
 import archiveIcon from '../../assets/icons/regular/archive.svg';
+import { updateDeviceLanguage } from '../../services/firebase';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -34,6 +35,8 @@ export class AppRoot {
       const stored = this.readStoredLanguage();
       if (stored) {
         this.language = stored;
+        this.persistLanguage(stored);
+        this.persistLanguageToServer(stored);
       }
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
@@ -51,6 +54,7 @@ export class AppRoot {
     const next = select.value as LanguageCode;
     this.language = next;
     this.persistLanguage(next);
+    this.persistLanguageToServer(next);
   };
 
   private navigate = (path: string) => {
@@ -75,6 +79,18 @@ export class AppRoot {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
     } catch {
       /* ignore persistence issues */
+    }
+  }
+
+  private persistLanguageToServer(lang: LanguageCode) {
+    try {
+      const deviceId = (window as any).__DEVICE_ID__;
+      if (!deviceId) return;
+      updateDeviceLanguage(deviceId, lang).catch(err =>
+        console.warn('[language] Failed to store device language', err),
+      );
+    } catch (err) {
+      console.warn('[language] Unable to access device id', err);
     }
   }
 

@@ -60,6 +60,7 @@ export interface DeviceDocument {
   referrer?: string | null;
   referrals?: number;
   fcmToken?: string | null;
+  language?: string | null;
   createdAt?: string | null;
   lastAnsweredAt?: string | null;
 }
@@ -301,6 +302,7 @@ export async function ensureDeviceDocument(
         referrer: referrerCode || null,
         referrals: 0,
         fcmToken: null,
+        language: null,
         createdAt: new Date().toISOString(),
         lastAnsweredAt: null,
       };
@@ -327,6 +329,9 @@ export async function ensureDeviceDocument(
     }
     if (data.referrals == null) {
       update.referrals = 0;
+    }
+    if (!data.language) {
+      update.language = null;
     }
     if (!('createdAt' in data)) {
       update.createdAt = new Date().toISOString();
@@ -407,6 +412,26 @@ export async function updateDeviceMessagingToken(
     );
   } catch (error) {
     console.warn('[firebase] Unable to store messaging token', error);
+  }
+}
+
+export async function updateDeviceLanguage(deviceId: string, language: string) {
+  const db = ensureFirestore();
+  if (!db || !deviceId) return;
+  try {
+    await ensureDeviceDocument(deviceId);
+    const deviceRef = doc(db, 'devices', deviceId);
+    await setDoc(
+      deviceRef,
+      {
+        deviceId,
+        language,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.warn('[firebase] Unable to store device language', error);
   }
 }
 
