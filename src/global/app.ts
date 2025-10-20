@@ -1,6 +1,7 @@
 import { ensureDeviceIdOnWindow } from '../services/device';
 import { ensureDeviceDocument, isFirebaseConfigured } from '../services/firebase';
 import { registerMessagingForDevice } from '../services/messaging';
+import { initAnalytics, logAnalyticsEvent } from '../services/analytics';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
 let swRefreshQueued = false;
@@ -52,6 +53,7 @@ const attachFirebaseConfigFlag = () => {
 export default async () => {
   injectFirebaseConfig();
   attachFirebaseConfigFlag();
+  initAnalytics();
   const deviceId = await ensureDeviceIdOnWindow();
   let ref = null;
   try {
@@ -66,6 +68,10 @@ export default async () => {
       (window as any).__DEVICE_SHORT_CODE__ = deviceDoc.shortCode;
     }
     registerMessagingForDevice(deviceId);
+    logAnalyticsEvent('app_bootstrap', {
+      deviceId,
+      referrer: ref || 'direct',
+    });
   }
   registerServiceWorker();
 };

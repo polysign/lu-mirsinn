@@ -13,6 +13,7 @@ import type { LanguageCode } from '../../types/language';
 import infoIcon from '../../assets/icons/regular/info.svg';
 import megaphoneIcon from '../../assets/icons/regular/megaphone.svg';
 import { registerMessagingForDevice } from '../../services/messaging';
+import { logAnalyticsEvent } from '../../services/analytics';
 type ErrorKey = 'missing-question' | 'load-failed' | 'submit-failed';
 
 interface ViewState {
@@ -358,6 +359,11 @@ export class AppHome {
         question,
         alreadyAnswered,
       };
+      logAnalyticsEvent('question_loaded', {
+        dateKey: this.todayKey,
+        hasQuestion: Boolean(question),
+        alreadyAnswered,
+      });
       if (!this.hasFirebase) {
         this.loadLocalPoints(false);
       }
@@ -548,6 +554,12 @@ export class AppHome {
       if (this.deviceId) {
         registerMessagingForDevice(this.deviceId, true);
       }
+      logAnalyticsEvent('answer_recorded', {
+        dateKey: this.todayKey,
+        option: this.selectedOption,
+        language: this.language,
+        viaFirebase: this.hasFirebase,
+      });
     } catch (error) {
       console.error(error);
       this.state = {
@@ -575,9 +587,18 @@ export class AppHome {
       try {
         await navigator.share(shareData);
         this.shareStatus = 'success';
+        logAnalyticsEvent('share_success', {
+          dateKey: this.todayKey,
+          method: 'web-share',
+        });
       } catch (err) {
         console.warn('Share cancelled or failed', err);
         this.shareStatus = 'error';
+        logAnalyticsEvent('share_failed', {
+          dateKey: this.todayKey,
+          method: 'web-share',
+          message: err?.message || 'cancelled',
+        });
       }
       return;
     }
@@ -587,9 +608,18 @@ export class AppHome {
         `${shareData.text} ${shareData.url}`,
       );
       this.shareStatus = 'success';
+      logAnalyticsEvent('share_success', {
+        dateKey: this.todayKey,
+        method: 'clipboard',
+      });
     } catch (err) {
       console.warn('Fallback share failed', err);
       this.shareStatus = 'error';
+      logAnalyticsEvent('share_failed', {
+        dateKey: this.todayKey,
+        method: 'clipboard',
+        message: err?.message || 'unknown',
+      });
     }
   }
 

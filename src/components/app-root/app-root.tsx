@@ -6,6 +6,7 @@ import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
 import archiveIcon from '../../assets/icons/regular/archive.svg';
 import { updateDeviceLanguage } from '../../services/firebase';
+import { logAnalyticsEvent } from '../../services/analytics';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -57,6 +58,7 @@ export class AppRoot {
     this.language = next;
     this.persistLanguage(next);
     this.persistLanguageToServer(next);
+    logAnalyticsEvent('language_changed', { language: next });
   };
 
   private navigate = (path: string) => {
@@ -112,8 +114,10 @@ export class AppRoot {
       }
 
       this.showInstallToast = true;
+      logAnalyticsEvent('install_toast_shown');
     } catch {
       this.showInstallToast = true;
+      logAnalyticsEvent('install_toast_shown');
     }
   }
 
@@ -124,6 +128,7 @@ export class AppRoot {
     } catch {
       /* ignore */
     }
+    logAnalyticsEvent('install_toast_dismissed');
   };
 
   render() {
