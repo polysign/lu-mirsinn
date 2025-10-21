@@ -355,6 +355,191 @@ function getNotificationCopy(questionDoc, lang) {
   return {title, body};
 }
 
+function truncateWords(text, maxWords) {
+  if (!text || !maxWords) return "";
+  const words = String(text)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length <= maxWords) {
+    return words.join(" ");
+  }
+  return words.slice(0, maxWords).join(" ");
+}
+
+function getQuestionTranslations(questionDoc) {
+  const question = {
+    lb: questionDoc?.question?.lb || "",
+    fr: questionDoc?.question?.fr || "",
+    de: questionDoc?.question?.de || "",
+    en: questionDoc?.question?.en || "",
+  };
+  const fallback = question.en || question.fr || question.de || question.lb || "The question";
+  for (const language of SUPPORTED_LANGUAGES) {
+    if (!question[language] || !question[language].trim()) {
+      question[language] = fallback;
+    }
+  }
+  return question;
+}
+
+function getOptionLabels(questionDoc, optionId) {
+  const option = (questionDoc?.options || []).find(item => item.id === optionId);
+  if (!option) {
+    return {
+      lb: optionId,
+      fr: optionId,
+      de: optionId,
+      en: optionId,
+    };
+  }
+  return {
+    lb: option.label?.lb || optionId,
+    fr: option.label?.fr || optionId,
+    de: option.label?.de || optionId,
+    en: option.label?.en || optionId,
+  };
+}
+
+function createNoVoteSummary(questionDoc) {
+  const question = getQuestionTranslations(questionDoc);
+  return {
+    lb: truncateWords(`Keng Stemmen fonnt fir "${question.lb || "d'Fro"}". Waart nach op Reaktiounen.`, 40),
+    fr: truncateWords(`Aucun vote enregistre pour "${question.fr || "la question"}". Analyse en attente des reponses.`, 40),
+    de: truncateWords(`Keine Stimmen fuer "${question.de || "die Frage"}". Ergebnis folgt sobald Antworten kommen.`, 40),
+    en: truncateWords(`No votes recorded for "${question.en || "the question"}". Waiting on responses before analysing.`, 40),
+  };
+}
+
+function fallbackResultSummary(questionDoc, breakdown, totalResponses) {
+  if (!totalResponses) {
+    return createNoVoteSummary(questionDoc);
+  }
+
+  const sorted = (breakdown || []).slice().sort((a, b) => (b.count || 0) - (a.count || 0));
+  const top = sorted[0];
+  if (!top) {
+    return createNoVoteSummary(questionDoc);
+  }
+
+  const question = getQuestionTranslations(questionDoc);
+  const labels = getOptionLabels(questionDoc, top.optionId);
+
+  return {
+    lb: truncateWords(
+      `${totalResponses} Stemmen: "${labels.lb}" kritt den Haaptzoustemmung op "${question.lb}".`,
+      40,
+    ),
+    fr: truncateWords(
+      `${totalResponses} votes : "${labels.fr}" emporte ladhesion principale sur "${question.fr}".`,
+      40,
+    ),
+    de: truncateWords(
+      `${totalResponses} Stimmen: "${labels.de}" setzt sich vorerst bei "${question.de}" durch.`,
+      40,
+    ),
+    en: truncateWords(
+      `${totalResponses} votes: "${labels.en}" currently shapes opinion on "${question.en}".`,
+      40,
+    ),
+  };
+}
+
+function sanitizeLocalizedSummary(summary) {
+  const result = {};
+  for (const language of SUPPORTED_LANGUAGES) {
+    const raw = summary?.[language];
+    if (typeof raw === "string" && raw.trim()) {
+      result[language] = truncateWords(raw.trim(), 40);
+    }
+  }
+  return result;
+}
+
+async function generateResultAnalysis(questionDoc, breakdown, totalResponses, openaiClient, model) {
+  if (!totalResponses || !Array.isArray(breakdown) || !breakdown.length) {
+    return createNoVoteSummary(questionDoc);
+  }
+
+  const question = getQuestionTranslations(questionDoc);
+  const options = (questionDoc?.options || []).map(option => ({
+    id: option.id,
+    label: {
+      lb: option.label?.lb || option.id,
+      fr: option.label?.fr || option.id,
+      de: option.label?.de || option.id,
+      en: option.label?.en || option.id,
+    },
+  }));
+  const enrichedBreakdown = breakdown.map(item => ({
+    optionId: item.optionId,
+    count: item.count,
+    percentage: item.percentage,
+    label: getOptionLabels(questionDoc, item.optionId),
+  }));
+
+  const payload = {
+    question,
+    totalResponses,
+    breakdown: enrichedBreakdown,
+    options,
+    analysis: questionDoc?.analysis || null,
+    article: questionDoc?.article || null,
+  };
+
+  const prompt = `You are a multilingual polling analyst. Review the poll question and response breakdown.
+Craft a concise interpretation (max 40 words per language) that explains what the results mean for the question's issue.
+Avoid repeating raw vote counts except when essential to support the insight.
+Summaries must exist for languages: lb, fr, de, en.
+Write plain ASCII text, no fancy punctuation, no quotation marks around the whole sentence.
+Respond with JSON only in the form:
+{"summary":{"lb":"...","fr":"...","de":"...","en":"..."}}`;
+
+  const messages = [
+    {
+      role: "system",
+      content: "You deliver compact polling analysis across Luxembourgish, French, German, and English. Stay neutral and factual. Output JSON only.",
+    },
+    {
+      role: "user",
+      content: `${prompt}\n\n[poll_context]\n${JSON.stringify(payload)}`,
+    },
+  ];
+
+  try {
+    const response = await openaiClient.chat.completions.create({
+      model,
+      temperature: 0.4,
+      messages,
+      response_format: {type: "json_object"},
+    });
+
+    const content = response.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error("OpenAI returned empty content for summary");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (error) {
+      logger.error("Failed to parse OpenAI summary response", {content});
+      throw error;
+    }
+
+    const sanitized = sanitizeLocalizedSummary(parsed.summary || parsed);
+    if (Object.keys(sanitized).length === SUPPORTED_LANGUAGES.length) {
+      return sanitized;
+    }
+    return fallbackResultSummary(questionDoc, breakdown, totalResponses);
+  } catch (error) {
+    logger.error("Failed to generate OpenAI result analysis", {
+      error: error.message,
+    });
+    return fallbackResultSummary(questionDoc, breakdown, totalResponses);
+  }
+}
+
 function chunk(array, size) {
   const chunks = [];
   for (let i = 0; i < array.length; i += size) {
@@ -432,7 +617,7 @@ async function sendNotificationsForQuestion(dateKey, questionDoc) {
       };
 
       try {
-        const response = await messaging.sendMulticast(message);
+        const response = await messaging.sendEachForMulticast(message);
         successes += response.successCount;
         failures += response.failureCount;
 
@@ -508,16 +693,19 @@ async function refreshHistoricalStats() {
     logger.warn('No question document found for stats refresh', {dateKey});
     return 'missing_question';
   }
+  const questionDoc = questionSnap.data() || {};
 
   const answersSnap = await db.collection(`questions/${dateKey}/answers`).get();
   if (answersSnap.empty) {
     logger.info('No answers found for question', {dateKey});
+    const summary = createNoVoteSummary(questionDoc);
     await questionRef.set({
       results: {
         totalResponses: 0,
         perOption: {},
         breakdown: [],
         lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        summary,
       },
     }, {merge: true});
     return 'no_answers';
@@ -537,6 +725,15 @@ async function refreshHistoricalStats() {
     count,
     percentage: totalResponses ? Math.round((count / totalResponses) * 1000) / 10 : 0,
   }));
+  let summary;
+  try {
+    const openaiClient = getOpenAIClient();
+    const model = getModelName();
+    summary = await generateResultAnalysis(questionDoc, breakdown, totalResponses, openaiClient, model);
+  } catch (error) {
+    logger.error('Unable to initialise OpenAI client for result analysis', {error: error.message});
+    summary = fallbackResultSummary(questionDoc, breakdown, totalResponses);
+  }
 
   await questionRef.set({
     results: {
@@ -544,6 +741,7 @@ async function refreshHistoricalStats() {
       perOption,
       breakdown,
       lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      summary,
     },
   }, {merge: true});
 
@@ -555,6 +753,7 @@ exports.refreshYesterdayStats = onSchedule(
   {
     schedule: '0 * * * *',
     timeZone: LUX_TZ,
+    secrets: [OPENAI_API_KEY],
   },
   async () => refreshHistoricalStats(),
 );

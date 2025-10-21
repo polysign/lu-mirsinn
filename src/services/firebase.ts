@@ -42,7 +42,7 @@ export interface QuestionDocument {
       percentage: number;
       count: number;
     }>;
-    summary?: string;
+    summary?: LocalizedText | null;
   };
 }
 

@@ -151,6 +151,18 @@ export class AppHistory {
     });
   }
 
+  private getSummary(question: QuestionDocument): string | null {
+    const summary = question.results?.summary;
+    if (!summary) {
+      return null;
+    }
+    if (typeof summary === 'string') {
+      return summary;
+    }
+    const localized = summary[this.language];
+    return localized || summary.lb || summary.en || null;
+  }
+
   render() {
     if (this.state.loading) {
       return (
@@ -190,6 +202,7 @@ export class AppHistory {
           const results = this.getResults(question);
           const expanded = this.state.expanded.has(key);
           const total = question.results?.totalResponses ?? results.reduce((acc, item) => acc + item.count, 0);
+          const summaryText = this.getSummary(question);
           const toggle = () => {
             const expandedSet = new Set(this.state.expanded);
             if (expandedSet.has(key)) {
@@ -209,7 +222,7 @@ export class AppHistory {
                   <span class="date">{formatDateLabel(key, this.language)}</span>
                   <h3>{this.getLocalizedQuestion(question)}</h3>
                 </header>
-                <span class="total-pill">{totalLabel(this.language, total)}</span>
+                {!expanded && <span class="total-pill">{totalLabel(this.language, total)}</span>}
               </button>
               <div class={{'history-body': true, open: expanded}}>
                 <dl>
@@ -232,9 +245,8 @@ export class AppHistory {
                     </div>
                   ))}
                 </dl>
-
-                {question.results?.summary && (
-                  <p class="summary">{question.results.summary}</p>
+                {expanded && summaryText && (
+                  <p class="summary">{summaryText}</p>
                 )}
 
                 <footer class="history-footer">
