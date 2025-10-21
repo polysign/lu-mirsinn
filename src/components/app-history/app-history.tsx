@@ -15,6 +15,7 @@ interface HistoryState {
 }
 
 const LUXEMBOURG_TZ = 'Europe/Luxembourg';
+const MAX_ARCHIVE_ITEMS = 10;
 
 const parseDateKey = (key: string) => {
   const [month, day, year] = key.split('-').map(part => Number(part));
@@ -60,6 +61,13 @@ const errorMessages: Record<LanguageCode, string> = {
   fr: 'Impossible de charger les questions précédentes. Réessayez plus tard.',
   de: 'Die vorherigen Fragen konnten nicht geladen werden. Bitte versuche es erneut.',
   en: 'We could not load the previous questions. Please try again.',
+};
+
+const archiveLimitNote: Record<LanguageCode, string> = {
+  lb: 'Nëmmen 10 Froen ginn an der App gehalen.',
+  fr: "Seulement 10 questions sont conservées dans l'application.",
+  de: 'Nur 10 Fragen werden in der App gespeichert.',
+  en: 'Only 10 questions are kept inside the app.',
 };
 
 const totalLabel = (language: LanguageCode, count: number) => {
@@ -114,7 +122,7 @@ export class AppHistory {
 
       this.state = {
         loading: false,
-        questions: filtered,
+        questions: filtered.slice(0, MAX_ARCHIVE_ITEMS),
         expanded: new Set<string>(),
       };
     } catch (error) {
@@ -258,6 +266,7 @@ export class AppHistory {
             </article>
           );
         })}
+        <p class="history-limit-note">{archiveLimitNote[this.language]}</p>
       </div>
     );
   }

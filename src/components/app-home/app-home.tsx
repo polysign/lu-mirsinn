@@ -86,6 +86,7 @@ const copy: Record<
     aboutTitle: string;
     aboutDescription: string;
     aboutBuiltBy: string;
+    aboutDeviceCodeLabel: string;
     aboutHelpLabel: string;
     dialogTitle: string;
     dialogConfirm: string;
@@ -124,6 +125,7 @@ const copy: Record<
     aboutDescription:
       "Mir Sinn ass eng Initiativ fir d'Meenung vu Lëtzebuerg ze sammelen. Dréit all Dag bäi a entdeckt, wat d'Gemeinschaft denkt.",
     aboutBuiltBy: 'Entwéckelt vun',
+    aboutDeviceCodeLabel: 'Device Code:',
     aboutHelpLabel: 'Konditiounen & Dateschutz',
     dialogTitle: 'Konditiounen & Dateschutz',
     dialogConfirm: 'Verstanen',
@@ -167,6 +169,7 @@ const copy: Record<
     aboutDescription:
       "Mir Sinn est une initiative pour recueillir le ressenti du Luxembourg. Participe chaque jour et découvre ce que pense la communauté.",
     aboutBuiltBy: 'Conçu par',
+    aboutDeviceCodeLabel: 'Device Code:',
     aboutHelpLabel: 'Conditions & vie privée',
     dialogTitle: 'Conditions & vie privée',
     dialogConfirm: 'Compris',
@@ -209,6 +212,7 @@ const copy: Record<
     aboutDescription:
       'Mir Sinn sammelt täglich die Stimmung Luxemburgs. Mach mit und erfahre, wie die Gemeinschaft denkt.',
     aboutBuiltBy: 'Entwickelt von',
+    aboutDeviceCodeLabel: 'Device Code:',
     aboutHelpLabel: 'Infos & Datenschutz',
     dialogTitle: 'Infos & Datenschutz',
     dialogConfirm: 'Verstanden',
@@ -251,6 +255,7 @@ const copy: Record<
     aboutDescription:
       'Mir Sinn captures Luxembourg’s daily pulse. Take part every day and see what the community thinks.',
     aboutBuiltBy: 'Built by',
+    aboutDeviceCodeLabel: 'Device Code:',
     aboutHelpLabel: 'Terms & privacy',
     dialogTitle: 'Terms & Privacy',
     dialogConfirm: 'Got it',
@@ -283,6 +288,7 @@ export class AppHome {
   @State() confettiBurst = false;
   @State() showPolicies = false;
   @State() overlayVisible = true;
+  @State() deviceShortCode: string | null = null;
 
   private todayKey = getTodayKey();
   private hasFirebase = false;
@@ -294,6 +300,7 @@ export class AppHome {
 
   componentWillLoad() {
     this.hasFirebase = Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
+    this.deviceShortCode = this.readWindowShortCode();
     this.loadQuestion().finally(() => {
       this.setupDeviceSubscription();
     });
@@ -322,6 +329,27 @@ export class AppHome {
 
   private get translations() {
     return copy[this.language];
+  }
+
+  private normalizeShortCode(code?: string | null): string | null {
+    if (typeof code !== 'string') return null;
+    const trimmed = code.trim();
+    return trimmed.length ? trimmed : null;
+  }
+
+  private readWindowShortCode(): string | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    return this.normalizeShortCode((window as any).__DEVICE_SHORT_CODE__);
+  }
+
+  private getDisplayShortCode(): string | null {
+    return (
+      this.normalizeShortCode(this.deviceShortCode) ||
+      this.normalizeShortCode(this.deviceSnapshot?.shortCode) ||
+      this.readWindowShortCode()
+    );
   }
 
   private async loadQuestion() {
@@ -439,6 +467,17 @@ export class AppHome {
     this.deviceUnsubscribe?.();
     this.deviceUnsubscribe = subscribeToDevice(id, (doc: DeviceDocument | null) => {
       this.deviceSnapshot = doc;
+      const normalizedShortCode = this.normalizeShortCode(doc?.shortCode);
+      if (normalizedShortCode) {
+        if (typeof window !== 'undefined') {
+          (window as any).__DEVICE_SHORT_CODE__ = normalizedShortCode;
+        }
+        if (normalizedShortCode !== this.deviceShortCode) {
+          this.deviceShortCode = normalizedShortCode;
+        }
+      } else if (this.deviceShortCode) {
+        this.deviceShortCode = null;
+      }
       const points = doc?.points ?? 0;
       const shouldAnimate = this.previousPoints !== null;
       this.handlePointsUpdate(points, shouldAnimate);
@@ -681,21 +720,16 @@ export class AppHome {
   }
 
   private latestShortCode(): string | null {
-    if (this.deviceSnapshot?.shortCode) {
-      return this.deviceSnapshot.shortCode;
-    }
-    const windowCode = (window as any).__DEVICE_SHORT_CODE__;
-    if (typeof windowCode === 'string' && windowCode.length > 0) {
-      return windowCode;
+    const current = this.getDisplayShortCode();
+    if (current) {
+      return current;
     }
     try {
       const params = new URLSearchParams(window.location.search);
-      const ownCode = params.get('from');
-      if (ownCode) return ownCode;
+      return this.normalizeShortCode(params.get('from'));
     } catch {
-      // ignore parse errors
+      return null;
     }
-    return null;
   }
 
   private renderLoader() {
@@ -781,6 +815,7 @@ export class AppHome {
     const translations = this.translations;
     const questionText = this.getLocalizedQuestion(question);
     const summaryText = this.getLocalizedSummary(question);
+    const deviceCode = this.getDisplayShortCode();
 
     return (
       <div class="question-wrapper">
@@ -855,6 +890,10 @@ export class AppHome {
             <span class="about-version">v0.0.8</span>
           </header>
           <p class="about-text">{translations.aboutDescription}</p>
+          <p class="about-code">
+            <span class="about-code-label">{translations.aboutDeviceCodeLabel}</span>
+            <span class="about-code-value">{deviceCode ?? '—'}</span>
+          </p>
           <footer class="about-footer">
             <span class="about-built">{translations.aboutBuiltBy}</span>
             <a href="https://autonoma.lu" target="_blank" rel="noopener">

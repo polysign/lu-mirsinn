@@ -14,6 +14,39 @@
   gap: 1rem;
 }
 
+.action-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.action-card::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(90deg, rgba(235, 83, 96, 0.35), rgba(255, 255, 255, 0.65), rgba(120, 172, 255, 0.35));
+  z-index: 0;
+  pointer-events: none;
+}
+
+.action-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(235, 83, 96, 0.08) 0%,
+    rgba(255, 255, 255, 0.7) 50%,
+    rgba(120, 172, 255, 0.08) 100%
+  );
+}
+
+.action-card > * {
+  position: relative;
+  z-index: 1;
+}
+
 .card header {
   display: flex;
   flex-direction: column;
@@ -72,6 +105,24 @@
   font-size: 0.9rem;
   color: rgba(0, 0, 0, 0.65);
   line-height: 1.5;
+}
+
+.about-code {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.about-code-label {
+  font-weight: 600;
+}
+
+.about-code-value {
+  font-family: 'SFMono-Regular', 'Roboto Mono', 'Source Code Pro', monospace;
+  letter-spacing: 0.08em;
 }
 
 .about-footer {
@@ -280,6 +331,7 @@
   margin: 0;
   font-size: 0.95rem;
   color: rgba(0, 0, 0, 0.65);
+  line-height: 135%;
 }
 
 .card h2 {
@@ -287,6 +339,7 @@
   font-size: 1.35rem;
   font-weight: 700;
   color: var(--app-text);
+  line-height: 120%;
 }
 
 .meta {

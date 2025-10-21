@@ -140,6 +140,13 @@ dl {
   font-size: 0.85rem;
 }
 
+.history-limit-note {
+  margin: 0.5rem 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.6);
+}
+
 .history-loading,
 .history-error,
 .history-empty {

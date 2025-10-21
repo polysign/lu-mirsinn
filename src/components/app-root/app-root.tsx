@@ -34,6 +34,8 @@ export class AppRoot {
   @State() currentPath: string = '/';
   @State() showInstallToast = false;
 
+  private unsubscribeRouterChange?: () => void;
+
   private handlePopState = () => {
     if (typeof window === 'undefined') return;
     this.currentPath = window.location.pathname || '/';
@@ -50,12 +52,25 @@ export class AppRoot {
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
       this.evaluateInstallPrompt();
+      this.unsubscribeRouterChange = Router.onChange('url', url => {
+        if (url && typeof url.pathname === 'string') {
+          this.currentPath = url.pathname;
+        }
+      });
     }
   }
 
   disconnectedCallback() {
     if (typeof window !== 'undefined') {
       window.removeEventListener('popstate', this.handlePopState);
+    }
+    if (this.unsubscribeRouterChange) {
+      try {
+        this.unsubscribeRouterChange();
+      } catch {
+        /* noop */
+      }
+      this.unsubscribeRouterChange = undefined;
     }
   }
 
@@ -169,10 +184,8 @@ export class AppRoot {
         )}
         <header class="app-header">
           <button class="home-link" onClick={() => this.navigate('/')}>
-            <span class="flag" aria-hidden="true">
-              <span class="stripe stripe-red" />
-              <span class="stripe stripe-white" />
-              <span class="stripe stripe-blue" />
+            <span class="logo" aria-hidden="true">
+              <img src="/assets/icon/mir-sinn-icon-192.png" alt="" />
             </span>
             <span class="branding">
               <span class="title">Mir Sinn</span>
