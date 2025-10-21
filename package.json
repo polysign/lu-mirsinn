@@ -1,7 +1,7 @@
 {
   "name": "lu-mirsinn",
   "private": true,
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Stencil App Starter",
   "scripts": {
     "build": "stencil build",
@@ -10,7 +10,8 @@
     "test.watch": "stencil test --spec --e2e --watchAll",
     "generate": "stencil generate",
     "postinstall": "npm-run-all install:*",
-    "install:icons": "cp -r ./node_modules/@phosphor-icons/core/assets ./src/assets/icons"
+    "install:icons": "cp -r ./node_modules/@phosphor-icons/core/assets ./src/assets/icons",
+    "postversion": "node scripts/sync-version.js && git add src/components/app-home/app-home.tsx"
   },
   "dependencies": {
     "@phosphor-icons/core": "^2.1.1",

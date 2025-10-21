@@ -1,5 +1,9 @@
 import { ensureDeviceIdOnWindow } from '../services/device';
-import { ensureDeviceDocument, isFirebaseConfigured } from '../services/firebase';
+import {
+  ensureDeviceDocument,
+  finalizeDeviceEmailLink,
+  isFirebaseConfigured,
+} from '../services/firebase';
 import { registerMessagingForDevice } from '../services/messaging';
 import { initAnalytics, logAnalyticsEvent } from '../services/analytics';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
@@ -109,6 +113,36 @@ const attachFirebaseConfigFlag = () => {
   (window as any).__MIR_SINN_HAS_FIREBASE__ = isFirebaseConfigured();
 };
 
+const clearEmailLinkQueryParams = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    const initialSearch = url.search;
+    const paramsToRemove = [
+      'oobCode',
+      'mode',
+      'lang',
+      'apiKey',
+      'continueUrl',
+      'authType',
+    ];
+    paramsToRemove.forEach(key => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+      }
+    });
+    if (url.search !== initialSearch) {
+      const next =
+        url.pathname +
+        (url.search ? `?${url.searchParams.toString()}` : '') +
+        url.hash;
+      window.history.replaceState({}, document.title, next);
+    }
+  } catch {
+    /* ignore URL cleanup issues */
+  }
+};
+
 export default async () => {
   injectFirebaseConfig();
   attachFirebaseConfigFlag();
@@ -131,6 +165,10 @@ export default async () => {
       deviceId,
       referrer: ref || 'direct',
     });
+    const linkResult = await finalizeDeviceEmailLink(deviceId);
+    if (linkResult) {
+      clearEmailLinkQueryParams();
+    }
   }
   registerServiceWorker();
 };

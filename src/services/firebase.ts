@@ -9,6 +9,14 @@ import {
   getDocs,
   onSnapshot,
 } from 'firebase/firestore';
+import {
+  getAuth,
+  type Auth,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  type UserCredential,
+} from 'firebase/auth';
 
 export interface LocalizedText {
   lb: string;
@@ -113,10 +121,14 @@ export interface DeviceDocument {
   createdAt?: string | null;
   lastAnsweredAt?: string | null;
   profile?: DeviceProfile | null;
+  authUid?: string | null;
+  authEmail?: string | null;
+  authLinkedAt?: string | null;
 }
 
 let appInstance: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
+let authInstance: Auth | null = null;
 
 type FirebaseEnvConfig = {
   apiKey?: string;
@@ -187,6 +199,161 @@ function ensureFirestore(): Firestore | null {
   if (!app) return null;
   dbInstance = getFirestore(app);
   return dbInstance;
+}
+
+function ensureAuth(): Auth | null {
+  if (authInstance) {
+    return authInstance;
+  }
+  const app = ensureApp();
+  if (!app) return null;
+  authInstance = getAuth(app);
+  return authInstance;
+}
+
+const EMAIL_LINK_STORAGE_KEY = 'mir-sinn-email-link-address';
+export const EMAIL_LINK_SUCCESS_SESSION_KEY = 'mir-sinn-email-link-success';
+
+export function storePendingEmailLink(email: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(EMAIL_LINK_STORAGE_KEY, email);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+export function readPendingEmailLink(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(EMAIL_LINK_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingEmailLink() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(EMAIL_LINK_STORAGE_KEY);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+export function consumeEmailLinkSuccess():
+  | { email: string | null }
+  | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(EMAIL_LINK_SUCCESS_SESSION_KEY);
+    if (!raw) return null;
+    window.sessionStorage.removeItem(EMAIL_LINK_SUCCESS_SESSION_KEY);
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && 'email' in parsed) {
+        return { email: typeof parsed.email === 'string' ? parsed.email : null };
+      }
+    } catch {
+      /* ignore parse issues */
+    }
+    return { email: null };
+  } catch {
+    return null;
+  }
+}
+
+const EMAIL_LANGUAGE_FALLBACKS: Record<string, string> = {
+  lb: 'de',
+  fr: 'fr',
+  de: 'de',
+  en: 'en',
+};
+
+export async function sendDeviceEmailLink(
+  email: string,
+  language?: string,
+): Promise<void> {
+  if (typeof window === 'undefined') {
+    throw new Error('Email link can only be sent in a browser environment.');
+  }
+  const auth = ensureAuth();
+  if (!auth) {
+    throw new Error('Firebase auth is not configured.');
+  }
+
+  if (language) {
+    const normalized = EMAIL_LANGUAGE_FALLBACKS[language] || language;
+    auth.languageCode = normalized;
+  }
+
+  const actionCodeSettings = {
+    url: `${window.location.origin}/profile`,
+    handleCodeInApp: true,
+    linkDomain: 'mirsinn.lu',
+  };
+
+  await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+  storePendingEmailLink(email);
+}
+
+export async function finalizeDeviceEmailLink(
+  deviceId: string,
+): Promise<{ email: string | null; uid: string } | null> {
+  if (typeof window === 'undefined') return null;
+  const auth = ensureAuth();
+  if (!auth) return null;
+
+  const href = window.location.href;
+  if (!isSignInWithEmailLink(auth, href)) {
+    return null;
+  }
+
+  let email = readPendingEmailLink();
+  if (!email) {
+    try {
+      email = window.prompt(
+        'Please confirm the email address you used to sign in:',
+      );
+    } catch {
+      email = null;
+    }
+    if (!email) {
+      return null;
+    }
+  }
+
+  let credential: UserCredential;
+  try {
+    credential = await signInWithEmailLink(auth, email, href);
+  } catch (error) {
+    console.warn('[firebase] Failed to complete email link sign-in', error);
+    return null;
+  } finally {
+    clearPendingEmailLink();
+  }
+
+  const user = credential.user;
+  if (!user) {
+    return null;
+  }
+
+  const resolvedEmail = user.email || email || null;
+  await linkDeviceToAuth(deviceId, user.uid, resolvedEmail);
+
+  try {
+    window.sessionStorage.setItem(
+      EMAIL_LINK_SUCCESS_SESSION_KEY,
+      JSON.stringify({ email: resolvedEmail }),
+    );
+  } catch {
+    /* ignore session storage failures */
+  }
+
+  return {
+    email: resolvedEmail,
+    uid: user.uid,
+  };
 }
 
 export async function getTodayQuestionDoc(
@@ -356,6 +523,9 @@ export async function ensureDeviceDocument(
         createdAt: new Date().toISOString(),
         lastAnsweredAt: null,
         profile: null,
+        authUid: null,
+        authEmail: null,
+        authLinkedAt: null,
       };
       await Promise.all([
         setDoc(deviceRef, docData),
@@ -395,6 +565,15 @@ export async function ensureDeviceDocument(
     }
     if (!('profile' in data)) {
       update.profile = null;
+    }
+    if (!('authUid' in data)) {
+      update.authUid = null;
+    }
+    if (!('authEmail' in data)) {
+      update.authEmail = null;
+    }
+    if (!('authLinkedAt' in data)) {
+      update.authLinkedAt = null;
     }
     let awardedReferrer = false;
     if (referrerCode && !data.referrer && referrerCode !== data.shortCode) {
@@ -524,6 +703,31 @@ export async function updateDeviceProfile(
     );
   } catch (error) {
     console.warn('[firebase] Unable to update device profile', error);
+  }
+}
+
+export async function linkDeviceToAuth(
+  deviceId: string,
+  uid: string,
+  email: string | null,
+) {
+  const db = ensureFirestore();
+  if (!db || !deviceId || !uid) return;
+  try {
+    await ensureDeviceDocument(deviceId);
+    const deviceRef = doc(db, 'devices', deviceId);
+    await setDoc(
+      deviceRef,
+      {
+        deviceId,
+        authUid: uid,
+        authEmail: email || null,
+        authLinkedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.warn('[firebase] Unable to link device with auth user', error);
   }
 }
 

@@ -1,5 +1,8 @@
 import { Component, Prop, State, Watch, h } from '@stencil/core';
 import {
+  consumeEmailLinkSuccess,
+  readPendingEmailLink,
+  sendDeviceEmailLink,
   subscribeToDevice,
   updateDeviceProfile,
   type DeviceDocument,
@@ -139,6 +142,23 @@ interface ProfileCopy {
   };
   offlineNotice: string;
   deviceUnavailable: string;
+  emailLink: {
+    title: string;
+    description: string;
+    actionLabel: string;
+    relinkLabel: string;
+    inputLabel: string;
+    inputPlaceholder: string;
+    submitLabel: string;
+    cancelLabel: string;
+    statusSending: string;
+    statusSent: string;
+    statusError: string;
+    invalidEmail: string;
+    linkedLabel: string;
+    linkedHint: string;
+    successMessage: string;
+  };
 }
 
 const copy: Record<LanguageCode, ProfileCopy> = {
@@ -164,6 +184,28 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'Et gëtt keng Verbindung mam Server. Är Profil-Ännerunge ginn nëmme lokal gespäichert.',
     deviceUnavailable:
       'Den Apparat ass net prett. Probéiert d\'App nei opzemaachen.',
+    emailLink: {
+      title: 'Verknëppelt Är Email',
+      description:
+        'Séchert dësen Apparat andeems Dir eng Emailadress verbonnt. Sou kënne mir Äre Profil erëmkréien, falls Dir Mir Sinn nei installéiere musst.',
+      actionLabel: 'Emailadress verknëppen',
+      relinkLabel: 'Emailadress aktualiséieren',
+      inputLabel: 'Emailadress',
+      inputPlaceholder: 'dir@example.lu',
+      submitLabel: 'Login-Link schécken',
+      cancelLabel: 'Ofbriechen',
+      statusSending: 'Email gëtt geschéckt…',
+      statusSent:
+        'Mir hunn e Login-Link un {email} geschéckt. Kontrolléiert Är Inbox fir d\'Verknëppung ofzeschléissen.',
+      statusError:
+        "D'Email konnt net geschéckt ginn. Probéiert et nach eng Kéier.",
+      invalidEmail: 'Gitt w.e.g. eng valabel Emailadress un.',
+      linkedLabel: 'Verbonnen Email',
+      linkedHint:
+        'Benotzt dës Email fir Mir Sinn op anere Geräter erëm ze fannen.',
+      successMessage:
+        '{email} ass elo mat dësem Apparat verbonnen.',
+    },
   },
   fr: {
     heading: 'Profil',
@@ -187,6 +229,27 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       "Connexion au serveur indisponible. Les modifications du profil restent sur cet appareil.",
     deviceUnavailable:
       'Le profil de l’appareil est indisponible. Veuillez relancer Mir Sinn.',
+    emailLink: {
+      title: 'Relie ton e-mail',
+      description:
+        'Sécurise cet appareil en associant une adresse e-mail. Nous l’utilisons pour retrouver ton profil si tu réinstalles Mir Sinn.',
+      actionLabel: 'Relier une adresse e-mail',
+      relinkLabel: 'Mettre à jour l’adresse e-mail',
+      inputLabel: 'Adresse e-mail',
+      inputPlaceholder: 'toi@example.com',
+      submitLabel: 'Envoyer le lien de connexion',
+      cancelLabel: 'Annuler',
+      statusSending: 'Envoi de l’e-mail…',
+      statusSent:
+        'Nous avons envoyé un lien de connexion à {email}. Consulte ta boîte de réception pour terminer la liaison.',
+      statusError: 'Impossible d’envoyer l’e-mail. Réessaie.',
+      invalidEmail: 'Entre une adresse e-mail valide.',
+      linkedLabel: 'E-mail lié',
+      linkedHint:
+        'Utilise cet e-mail pour reconnecter Mir Sinn sur un autre appareil.',
+      successMessage:
+        '{email} est maintenant lié à cet appareil.',
+    },
   },
   de: {
     heading: 'Profil',
@@ -210,6 +273,28 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'Server nicht erreichbar. Profiländerungen werden nur lokal gespeichert.',
     deviceUnavailable:
       'Das Gerät ist noch nicht bereit. Bitte starte Mir Sinn neu.',
+    emailLink: {
+      title: 'E-Mail verknüpfen',
+      description:
+        'Schütze dieses Gerät, indem du eine E-Mail-Adresse hinterlegst. So können wir dein Profil wiederherstellen, falls du Mir Sinn neu installierst.',
+      actionLabel: 'E-Mail-Adresse verknüpfen',
+      relinkLabel: 'E-Mail-Adresse aktualisieren',
+      inputLabel: 'E-Mail-Adresse',
+      inputPlaceholder: 'du@example.de',
+      submitLabel: 'Login-Link senden',
+      cancelLabel: 'Abbrechen',
+      statusSending: 'E-Mail wird gesendet…',
+      statusSent:
+        'Wir haben einen Login-Link an {email} geschickt. Prüfe dein Postfach, um die Verknüpfung abzuschließen.',
+      statusError:
+        'E-Mail konnte nicht gesendet werden. Bitte versuche es erneut.',
+      invalidEmail: 'Bitte gib eine gültige E-Mail-Adresse ein.',
+      linkedLabel: 'Verknüpfte E-Mail',
+      linkedHint:
+        'Nutze diese E-Mail, um Mir Sinn auf anderen Geräten wiederzufinden.',
+      successMessage:
+        '{email} ist jetzt mit diesem Gerät verknüpft.',
+    },
   },
   en: {
     heading: 'Profile',
@@ -233,6 +318,27 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'No server connection detected. Profile changes are stored on this device only.',
     deviceUnavailable:
       'The device is not ready yet. Please reopen Mir Sinn and try again.',
+    emailLink: {
+      title: 'Link your email',
+      description:
+        'Keep this device safe by adding an email address. We use it to restore your profile if you reinstall Mir Sinn.',
+      actionLabel: 'Link Email Address',
+      relinkLabel: 'Update Email Address',
+      inputLabel: 'Email address',
+      inputPlaceholder: 'you@example.com',
+      submitLabel: 'Send sign-in link',
+      cancelLabel: 'Cancel',
+      statusSending: 'Sending email…',
+      statusSent:
+        'We sent a login link to {email}. Check your inbox to finish linking.',
+      statusError: 'Could not send the email. Please try again.',
+      invalidEmail: 'Please enter a valid email address.',
+      linkedLabel: 'Linked email',
+      linkedHint:
+        'Use this email to reconnect Mir Sinn on other devices.',
+      successMessage:
+        '{email} is now linked to this device.',
+    },
   },
 };
 
@@ -288,6 +394,13 @@ export class AppProfile {
   @State() draft: DeviceProfile = normalizeProfile();
   @State() saveState: SaveState = 'idle';
   @State() errorMessage: string | null = null;
+  @State() device: DeviceDocument | null = null;
+  @State() showEmailForm = false;
+  @State() emailInput = '';
+  @State()
+  emailLinkStatus: 'idle' | 'sending' | 'sent' | 'success' | 'error' = 'idle';
+  @State() emailLinkContextEmail: string | null = null;
+  @State() emailLinkErrorType: 'invalid' | 'failed' | null = null;
 
   private hasFirebase = false;
   private deviceUnsubscribe?: () => void;
@@ -312,6 +425,20 @@ export class AppProfile {
     this.hasFirebase =
       typeof window !== 'undefined' &&
       Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
+
+    const linkSuccess = consumeEmailLinkSuccess();
+    if (linkSuccess) {
+      this.emailLinkStatus = 'success';
+      this.emailLinkContextEmail = linkSuccess.email;
+      this.emailLinkErrorType = null;
+    } else {
+      const pendingEmail = readPendingEmailLink();
+      if (pendingEmail) {
+        this.emailLinkStatus = 'sent';
+        this.emailLinkContextEmail = pendingEmail;
+        this.emailLinkErrorType = null;
+      }
+    }
 
     if (this.hasFirebase) {
       this.setupDeviceSubscription();
@@ -362,13 +489,22 @@ export class AppProfile {
     }
 
     this.deviceUnsubscribe?.();
-    this.deviceUnsubscribe = subscribeToDevice(id, (doc: DeviceDocument | null) => {
-      const profile = normalizeProfile(doc?.profile);
-      if (!profilesEqual(profile, this.draft)) {
-        this.draft = profile;
-      }
-      this.ready = true;
-    });
+    this.deviceUnsubscribe = subscribeToDevice(
+      id,
+      (doc: DeviceDocument | null) => {
+        const profile = normalizeProfile(doc?.profile);
+        if (!profilesEqual(profile, this.draft)) {
+          this.draft = profile;
+        }
+        this.device = doc;
+        if (doc?.authUid && this.emailLinkStatus === 'sent') {
+          this.emailLinkStatus = 'success';
+          this.emailLinkContextEmail = doc.authEmail ?? this.emailLinkContextEmail;
+          this.emailLinkErrorType = null;
+        }
+        this.ready = true;
+      },
+    );
   }
 
   private loadLocalProfile(): DeviceProfile {
@@ -521,6 +657,173 @@ export class AppProfile {
     );
   }
 
+  private formatEmail(template: string, email: string | null): string {
+    return template.replace('{email}', email || '');
+  }
+
+  private startEmailLink = () => {
+    const pending = readPendingEmailLink();
+    this.emailInput =
+      this.device?.authEmail ?? pending ?? this.emailLinkContextEmail ?? '';
+    this.showEmailForm = true;
+    if (this.emailLinkStatus === 'error') {
+      this.emailLinkStatus = 'idle';
+      this.emailLinkErrorType = null;
+    }
+  };
+
+  private cancelEmailLink = () => {
+    if (this.emailLinkStatus === 'sending') {
+      return;
+    }
+    this.showEmailForm = false;
+    this.emailInput = '';
+    this.emailLinkErrorType = null;
+    if (this.emailLinkStatus === 'idle') {
+      this.emailLinkContextEmail = this.emailLinkContextEmail;
+    }
+  };
+
+  private handleEmailInput = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    this.emailInput = input.value;
+    if (this.emailLinkStatus === 'error') {
+      this.emailLinkStatus = 'idle';
+      this.emailLinkErrorType = null;
+    }
+  };
+
+  private submitEmailLink = async (event: Event) => {
+    event.preventDefault();
+    if (!this.hasFirebase || this.emailLinkStatus === 'sending') {
+      return;
+    }
+    const email = this.emailInput.trim();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(email)) {
+      this.emailLinkStatus = 'error';
+      this.emailLinkErrorType = 'invalid';
+      return;
+    }
+    this.emailLinkStatus = 'sending';
+    this.emailLinkErrorType = null;
+    try {
+      await sendDeviceEmailLink(email, this.language);
+      this.emailLinkStatus = 'sent';
+      this.emailLinkContextEmail = email;
+      this.emailInput = '';
+      this.showEmailForm = false;
+    } catch (error) {
+      console.warn('[profile] Failed to send device email link', error);
+      this.emailLinkStatus = 'error';
+      this.emailLinkErrorType = 'failed';
+    }
+  };
+
+  private renderEmailLinkStatus() {
+    const linkCopy = this.translations.emailLink;
+    if (this.emailLinkStatus === 'sending') {
+      return <p class="email-card__status email-card__status--info">{linkCopy.statusSending}</p>;
+    }
+    if (this.emailLinkStatus === 'sent') {
+      return (
+        <p class="email-card__status email-card__status--info">
+          {this.formatEmail(linkCopy.statusSent, this.emailLinkContextEmail)}
+        </p>
+      );
+    }
+    if (this.emailLinkStatus === 'success') {
+      return (
+        <p class="email-card__status email-card__status--success">
+          {this.formatEmail(linkCopy.successMessage, this.emailLinkContextEmail)}
+        </p>
+      );
+    }
+    if (this.emailLinkStatus === 'error') {
+      const message =
+        this.emailLinkErrorType === 'invalid'
+          ? linkCopy.invalidEmail
+          : linkCopy.statusError;
+      return (
+        <p class="email-card__status email-card__status--error">{message}</p>
+      );
+    }
+    return null;
+  }
+
+  private renderEmailLinkCard() {
+    if (!this.hasFirebase) {
+      return null;
+    }
+    const linkCopy = this.translations.emailLink;
+    const isLinked = Boolean(this.device?.authUid);
+    const linkedEmail = this.device?.authEmail ?? null;
+    const disableForm = this.emailLinkStatus === 'sending';
+
+    return (
+      <section class="email-card">
+        <div class="email-card__header">
+          <h2>{linkCopy.title}</h2>
+          <p>{linkCopy.description}</p>
+        </div>
+        {isLinked ? (
+          <div class="email-card__linked">
+            <span class="email-card__label">{linkCopy.linkedLabel}</span>
+            <span class="email-card__value">{linkedEmail || '—'}</span>
+            <p class="email-card__hint">{linkCopy.linkedHint}</p>
+          </div>
+        ) : null}
+        {this.showEmailForm ? (
+          <form class="email-card__form" onSubmit={this.submitEmailLink}>
+            <label class="email-card__form-label" htmlFor="profile-email-link">
+              {linkCopy.inputLabel}
+            </label>
+            <input
+              id="profile-email-link"
+              type="email"
+              value={this.emailInput}
+              placeholder={linkCopy.inputPlaceholder}
+              onInput={this.handleEmailInput}
+              disabled={disableForm}
+              required
+            />
+            <div class="email-card__actions">
+              <button
+                type="submit"
+                class="email-card__button email-card__button--primary"
+                disabled={disableForm}
+              >
+                {linkCopy.submitLabel}
+              </button>
+              <button
+                type="button"
+                class="email-card__button"
+                onClick={this.cancelEmailLink}
+                disabled={disableForm}
+              >
+                {linkCopy.cancelLabel}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div class="email-card__actions">
+            <button
+              type="button"
+              class="email-card__button email-card__button--primary"
+              onClick={this.startEmailLink}
+              disabled={!this.ready}
+            >
+              {isLinked ? linkCopy.relinkLabel : linkCopy.actionLabel}
+            </button>
+          </div>
+        )}
+        <div class="email-card__status-wrapper" aria-live="polite">
+          {this.renderEmailLinkStatus()}
+        </div>
+      </section>
+    );
+  }
+
   render() {
     const t = this.translations;
     const disableInputs = !this.ready;
@@ -531,6 +834,7 @@ export class AppProfile {
           <h1>{t.heading}</h1>
           <p>{t.intro}</p>
         </header>
+        {this.renderEmailLinkCard()}
         {!this.ready ? (
           <div class="loading" role="status" aria-live="polite">
             <div class="spinner" />
