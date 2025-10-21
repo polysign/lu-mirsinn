@@ -7,15 +7,33 @@ import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 let shouldReloadOnControllerChange = false;
 let reloadHandled = false;
 
+const isStandaloneDisplayMode = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
+      return true;
+    }
+  } catch (error) {
+    console.warn('[sw] Failed to inspect display-mode media query', error);
+  }
+  return (window.navigator as any).standalone === true;
+};
+
 const registerServiceWorker = async () => {
   if (!('serviceWorker' in navigator)) return;
   if (location.hostname === 'localhost' || location.protocol === 'http:') {
     return;
   }
+  const autoReloadEnabled = !isStandaloneDisplayMode();
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
 
     const triggerSkipWaiting = (worker: ServiceWorker | null) => {
+      if (!autoReloadEnabled) {
+        return;
+      }
       if (worker && worker.state === 'installed' && navigator.serviceWorker.controller) {
         shouldReloadOnControllerChange = true;
         worker.postMessage({ type: 'SKIP_WAITING' });
@@ -33,6 +51,9 @@ const registerServiceWorker = async () => {
     });
 
     navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!autoReloadEnabled) {
+        return;
+      }
       if (!shouldReloadOnControllerChange || reloadHandled) {
         return;
       }
