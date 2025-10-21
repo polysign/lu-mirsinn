@@ -1,10 +1,10 @@
 import { Component, Prop, State, Watch, h } from '@stencil/core';
+import type { FirebaseError } from 'firebase/app';
 import {
-  consumeEmailLinkSuccess,
-  readPendingEmailLink,
-  sendDeviceEmailLink,
+  requestDeviceAccount,
   subscribeToDevice,
   updateDeviceProfile,
+  verifyDeviceAccount,
   type DeviceDocument,
   type DeviceGender,
   type DeviceLivingArea,
@@ -142,22 +142,30 @@ interface ProfileCopy {
   };
   offlineNotice: string;
   deviceUnavailable: string;
-  emailLink: {
+  emailAccount: {
     title: string;
     description: string;
     actionLabel: string;
     relinkLabel: string;
-    inputLabel: string;
-    inputPlaceholder: string;
-    submitLabel: string;
+    emailLabel: string;
+    emailPlaceholder: string;
+    passwordLabel: string;
+    passwordPlaceholder: string;
+    sendLabel: string;
+    resendLabel: string;
+    verifyLabel: string;
     cancelLabel: string;
-    statusSending: string;
-    statusSent: string;
-    statusError: string;
+    statusSendingEmail: string;
+    statusEmailSent: string;
+    statusVerifying: string;
+    statusSendError: string;
+    statusVerifyError: string;
+    statusSuccess: string;
     invalidEmail: string;
+    invalidPassword: string;
     linkedLabel: string;
     linkedHint: string;
-    successMessage: string;
+    passwordHint: string;
   };
 }
 
@@ -184,27 +192,37 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'Et gëtt keng Verbindung mam Server. Är Profil-Ännerunge ginn nëmme lokal gespäichert.',
     deviceUnavailable:
       'Den Apparat ass net prett. Probéiert d\'App nei opzemaachen.',
-    emailLink: {
+    emailAccount: {
       title: 'Verknëppelt Är Email',
       description:
-        'Séchert dësen Apparat andeems Dir eng Emailadress verbonnt. Sou kënne mir Äre Profil erëmkréien, falls Dir Mir Sinn nei installéiere musst.',
+        'Séchert dësen Apparat mat engem Mir Sinn Login. Mir schécken Iech e Passwuert per Email, sou kënnt Dir Iech spéider erëm verbannen.',
       actionLabel: 'Emailadress verknëppen',
       relinkLabel: 'Emailadress aktualiséieren',
-      inputLabel: 'Emailadress',
-      inputPlaceholder: 'dir@example.lu',
-      submitLabel: 'Login-Link schécken',
+      emailLabel: 'Emailadress',
+      emailPlaceholder: 'dir@example.lu',
+      passwordLabel: 'Passwuert',
+      passwordPlaceholder: 'Gitt d\'Passwuert aus der Email an',
+      sendLabel: 'Passwuert schécken',
+      resendLabel: 'Neit Passwuert schécken',
+      verifyLabel: 'Passwuert iwwerpréiwen',
       cancelLabel: 'Ofbriechen',
-      statusSending: 'Email gëtt geschéckt…',
-      statusSent:
-        'Mir hunn e Login-Link un {email} geschéckt. Kontrolléiert Är Inbox fir d\'Verknëppung ofzeschléissen.',
-      statusError:
+      statusSendingEmail: 'Passwuert gëtt geschéckt…',
+      statusEmailSent:
+        'Mir hunn eng Email un {email} geschéckt mat Ärem Passwuert. Gitt et hei drënner an fir d\'Verknëppung ofzeschléissen.',
+      statusVerifying: 'Passwuert gëtt gepréift…',
+      statusSendError:
         "D'Email konnt net geschéckt ginn. Probéiert et nach eng Kéier.",
+      statusVerifyError:
+        'D\'Passwuert konnt net verifizéiert ginn. Kontrolléiert de Code a probéiert et nach eng Kéier.',
+      statusSuccess:
+        '{email} ass elo mat dësem Apparat verbonnen.',
       invalidEmail: 'Gitt w.e.g. eng valabel Emailadress un.',
+      invalidPassword: 'Gitt d\'8 Zeeche laangt Passwuert aus der Email an.',
       linkedLabel: 'Verbonnen Email',
       linkedHint:
         'Benotzt dës Email fir Mir Sinn op anere Geräter erëm ze fannen.',
-      successMessage:
-        '{email} ass elo mat dësem Apparat verbonnen.',
+      passwordHint:
+        "D'Passwuert huet 8 Zeechen an enthält nëmmen grouss Buschtawen a Zuelen.",
     },
   },
   fr: {
@@ -229,26 +247,37 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       "Connexion au serveur indisponible. Les modifications du profil restent sur cet appareil.",
     deviceUnavailable:
       'Le profil de l’appareil est indisponible. Veuillez relancer Mir Sinn.',
-    emailLink: {
+    emailAccount: {
       title: 'Relie ton e-mail',
       description:
-        'Sécurise cet appareil en associant une adresse e-mail. Nous l’utilisons pour retrouver ton profil si tu réinstalles Mir Sinn.',
+        'Sécurise cet appareil avec un compte Mir Sinn. Nous t’envoyons un mot de passe par e-mail pour te reconnecter plus tard.',
       actionLabel: 'Relier une adresse e-mail',
       relinkLabel: 'Mettre à jour l’adresse e-mail',
-      inputLabel: 'Adresse e-mail',
-      inputPlaceholder: 'toi@example.com',
-      submitLabel: 'Envoyer le lien de connexion',
+      emailLabel: 'Adresse e-mail',
+      emailPlaceholder: 'toi@example.com',
+      passwordLabel: 'Mot de passe',
+      passwordPlaceholder: 'Entre le mot de passe reçu',
+      sendLabel: 'Envoyer le mot de passe',
+      resendLabel: 'Renvoyer le mot de passe',
+      verifyLabel: 'Vérifier le mot de passe',
       cancelLabel: 'Annuler',
-      statusSending: 'Envoi de l’e-mail…',
-      statusSent:
-        'Nous avons envoyé un lien de connexion à {email}. Consulte ta boîte de réception pour terminer la liaison.',
-      statusError: 'Impossible d’envoyer l’e-mail. Réessaie.',
+      statusSendingEmail: 'Envoi du mot de passe…',
+      statusEmailSent:
+        'Nous avons envoyé un e-mail à {email} avec ton mot de passe. Entre-le ci-dessous pour terminer la liaison.',
+      statusVerifying: 'Vérification du mot de passe…',
+      statusSendError: 'Impossible d’envoyer l’e-mail. Réessaie.',
+      statusVerifyError:
+        'Mot de passe incorrect. Vérifie le code et réessaie.',
+      statusSuccess:
+        '{email} est maintenant lié à cet appareil.',
       invalidEmail: 'Entre une adresse e-mail valide.',
+      invalidPassword:
+        'Entre le mot de passe de 8 caractères reçu par e-mail.',
       linkedLabel: 'E-mail lié',
       linkedHint:
         'Utilise cet e-mail pour reconnecter Mir Sinn sur un autre appareil.',
-      successMessage:
-        '{email} est maintenant lié à cet appareil.',
+      passwordHint:
+        'Le mot de passe compte 8 caractères avec seulement des majuscules et des chiffres.',
     },
   },
   de: {
@@ -273,27 +302,38 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'Server nicht erreichbar. Profiländerungen werden nur lokal gespeichert.',
     deviceUnavailable:
       'Das Gerät ist noch nicht bereit. Bitte starte Mir Sinn neu.',
-    emailLink: {
+    emailAccount: {
       title: 'E-Mail verknüpfen',
       description:
-        'Schütze dieses Gerät, indem du eine E-Mail-Adresse hinterlegst. So können wir dein Profil wiederherstellen, falls du Mir Sinn neu installierst.',
+        'Schütze dieses Gerät mit einem Mir Sinn Login. Wir schicken dir ein Passwort per E-Mail, damit du dich später wieder verbinden kannst.',
       actionLabel: 'E-Mail-Adresse verknüpfen',
       relinkLabel: 'E-Mail-Adresse aktualisieren',
-      inputLabel: 'E-Mail-Adresse',
-      inputPlaceholder: 'du@example.de',
-      submitLabel: 'Login-Link senden',
+      emailLabel: 'E-Mail-Adresse',
+      emailPlaceholder: 'du@example.de',
+      passwordLabel: 'Passwort',
+      passwordPlaceholder: 'Passwort aus der E-Mail eingeben',
+      sendLabel: 'Passwort senden',
+      resendLabel: 'Passwort erneut senden',
+      verifyLabel: 'Passwort prüfen',
       cancelLabel: 'Abbrechen',
-      statusSending: 'E-Mail wird gesendet…',
-      statusSent:
-        'Wir haben einen Login-Link an {email} geschickt. Prüfe dein Postfach, um die Verknüpfung abzuschließen.',
-      statusError:
+      statusSendingEmail: 'Passwort wird gesendet…',
+      statusEmailSent:
+        'Wir haben eine E-Mail an {email} geschickt. Gib das Passwort unten ein, um die Verknüpfung abzuschließen.',
+      statusVerifying: 'Passwort wird geprüft…',
+      statusSendError:
         'E-Mail konnte nicht gesendet werden. Bitte versuche es erneut.',
+      statusVerifyError:
+        'Das Passwort ist ungültig. Bitte Code prüfen und erneut versuchen.',
+      statusSuccess:
+        '{email} ist jetzt mit diesem Gerät verknüpft.',
       invalidEmail: 'Bitte gib eine gültige E-Mail-Adresse ein.',
+      invalidPassword:
+        'Bitte gib das 8-stellige Passwort aus der E-Mail ein.',
       linkedLabel: 'Verknüpfte E-Mail',
       linkedHint:
         'Nutze diese E-Mail, um Mir Sinn auf anderen Geräten wiederzufinden.',
-      successMessage:
-        '{email} ist jetzt mit diesem Gerät verknüpft.',
+      passwordHint:
+        'Das Passwort besteht aus 8 Zeichen mit nur Großbuchstaben und Zahlen.',
     },
   },
   en: {
@@ -318,26 +358,37 @@ const copy: Record<LanguageCode, ProfileCopy> = {
       'No server connection detected. Profile changes are stored on this device only.',
     deviceUnavailable:
       'The device is not ready yet. Please reopen Mir Sinn and try again.',
-    emailLink: {
+    emailAccount: {
       title: 'Link your email',
       description:
-        'Keep this device safe by adding an email address. We use it to restore your profile if you reinstall Mir Sinn.',
+        'Secure this device with a Mir Sinn login. We will email you a password so you can reconnect later.',
       actionLabel: 'Link Email Address',
       relinkLabel: 'Update Email Address',
-      inputLabel: 'Email address',
-      inputPlaceholder: 'you@example.com',
-      submitLabel: 'Send sign-in link',
+      emailLabel: 'Email address',
+      emailPlaceholder: 'you@example.com',
+      passwordLabel: 'Password',
+      passwordPlaceholder: 'Enter the password from your email',
+      sendLabel: 'Send password',
+      resendLabel: 'Send new password',
+      verifyLabel: 'Verify password',
       cancelLabel: 'Cancel',
-      statusSending: 'Sending email…',
-      statusSent:
-        'We sent a login link to {email}. Check your inbox to finish linking.',
-      statusError: 'Could not send the email. Please try again.',
+      statusSendingEmail: 'Sending password…',
+      statusEmailSent:
+        'We sent an email to {email} with your password. Enter it below to finish linking.',
+      statusVerifying: 'Checking password…',
+      statusSendError: 'Could not send the email. Please try again.',
+      statusVerifyError:
+        'We could not verify that password. Check the code and try again.',
+      statusSuccess:
+        '{email} is now linked to this device.',
       invalidEmail: 'Please enter a valid email address.',
+      invalidPassword:
+        'Please enter the 8-character password from your email.',
       linkedLabel: 'Linked email',
       linkedHint:
         'Use this email to reconnect Mir Sinn on other devices.',
-      successMessage:
-        '{email} is now linked to this device.',
+      passwordHint:
+        'Your password is 8 characters long and only uses capital letters and numbers.',
     },
   },
 };
@@ -397,10 +448,24 @@ export class AppProfile {
   @State() device: DeviceDocument | null = null;
   @State() showEmailForm = false;
   @State() emailInput = '';
+  @State() passwordInput = '';
+  @State() emailStage: 'email' | 'password' | null = null;
   @State()
-  emailLinkStatus: 'idle' | 'sending' | 'sent' | 'success' | 'error' = 'idle';
-  @State() emailLinkContextEmail: string | null = null;
-  @State() emailLinkErrorType: 'invalid' | 'failed' | null = null;
+  emailStatus:
+    | 'idle'
+    | 'sendingEmail'
+    | 'emailSent'
+    | 'verifyingPassword'
+    | 'verified'
+    | 'error' = 'idle';
+  @State() emailContextEmail: string | null = null;
+  @State()
+  emailErrorType:
+    | 'invalid-email'
+    | 'send-failed'
+    | 'invalid-password'
+    | 'verify-failed'
+    | null = null;
 
   private hasFirebase = false;
   private deviceUnsubscribe?: () => void;
@@ -425,20 +490,6 @@ export class AppProfile {
     this.hasFirebase =
       typeof window !== 'undefined' &&
       Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
-
-    const linkSuccess = consumeEmailLinkSuccess();
-    if (linkSuccess) {
-      this.emailLinkStatus = 'success';
-      this.emailLinkContextEmail = linkSuccess.email;
-      this.emailLinkErrorType = null;
-    } else {
-      const pendingEmail = readPendingEmailLink();
-      if (pendingEmail) {
-        this.emailLinkStatus = 'sent';
-        this.emailLinkContextEmail = pendingEmail;
-        this.emailLinkErrorType = null;
-      }
-    }
 
     if (this.hasFirebase) {
       this.setupDeviceSubscription();
@@ -497,10 +548,11 @@ export class AppProfile {
           this.draft = profile;
         }
         this.device = doc;
-        if (doc?.authUid && this.emailLinkStatus === 'sent') {
-          this.emailLinkStatus = 'success';
-          this.emailLinkContextEmail = doc.authEmail ?? this.emailLinkContextEmail;
-          this.emailLinkErrorType = null;
+        if (doc?.authUid) {
+          this.emailContextEmail = doc.authEmail ?? this.emailContextEmail;
+          if (this.emailStatus === 'idle') {
+            this.emailStatus = 'verified';
+          }
         }
         this.ready = true;
       },
@@ -661,164 +713,297 @@ export class AppProfile {
     return template.replace('{email}', email || '');
   }
 
-  private startEmailLink = () => {
-    const pending = readPendingEmailLink();
+  private startEmailAccountFlow = () => {
     this.emailInput =
-      this.device?.authEmail ?? pending ?? this.emailLinkContextEmail ?? '';
+      this.device?.authEmail ?? this.emailContextEmail ?? '';
+    this.passwordInput = '';
     this.showEmailForm = true;
-    if (this.emailLinkStatus === 'error') {
-      this.emailLinkStatus = 'idle';
-      this.emailLinkErrorType = null;
-    }
+    this.emailStage = 'email';
+    this.emailStatus = 'idle';
+    this.emailErrorType = null;
   };
 
-  private cancelEmailLink = () => {
-    if (this.emailLinkStatus === 'sending') {
+  private cancelEmailAccountFlow = () => {
+    if (this.emailStatus === 'sendingEmail' || this.emailStatus === 'verifyingPassword') {
       return;
     }
     this.showEmailForm = false;
+    this.emailStage = null;
     this.emailInput = '';
-    this.emailLinkErrorType = null;
-    if (this.emailLinkStatus === 'idle') {
-      this.emailLinkContextEmail = this.emailLinkContextEmail;
+    this.passwordInput = '';
+    this.emailErrorType = null;
+    if (this.emailStatus !== 'verified') {
+      this.emailStatus = 'idle';
     }
+  };
+
+  private restartEmailStage = () => {
+    if (this.emailStatus === 'verifyingPassword') {
+      return;
+    }
+    this.emailStage = 'email';
+    this.emailStatus = 'idle';
+    this.emailErrorType = null;
+    this.passwordInput = '';
+    this.emailInput = this.emailContextEmail ?? this.device?.authEmail ?? '';
   };
 
   private handleEmailInput = (event: Event) => {
     const input = event.target as HTMLInputElement;
     this.emailInput = input.value;
-    if (this.emailLinkStatus === 'error') {
-      this.emailLinkStatus = 'idle';
-      this.emailLinkErrorType = null;
+    if (this.emailStatus === 'error' && this.emailErrorType === 'invalid-email') {
+      this.emailStatus = 'idle';
+      this.emailErrorType = null;
     }
   };
 
-  private submitEmailLink = async (event: Event) => {
+  private handlePasswordInput = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    this.passwordInput = input.value.toUpperCase();
+    if (this.emailStatus === 'error' && this.emailErrorType === 'invalid-password') {
+      this.emailStatus = 'idle';
+      this.emailErrorType = null;
+    }
+  };
+
+  private submitEmailRequest = async (event: Event) => {
     event.preventDefault();
-    if (!this.hasFirebase || this.emailLinkStatus === 'sending') {
+    if (!this.hasFirebase || this.emailStatus === 'sendingEmail') {
       return;
     }
     const email = this.emailInput.trim();
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(email)) {
-      this.emailLinkStatus = 'error';
-      this.emailLinkErrorType = 'invalid';
+      this.emailStatus = 'error';
+      this.emailErrorType = 'invalid-email';
       return;
     }
-    this.emailLinkStatus = 'sending';
-    this.emailLinkErrorType = null;
+    this.emailStatus = 'sendingEmail';
+    this.emailErrorType = null;
     try {
-      await sendDeviceEmailLink(email, this.language);
-      this.emailLinkStatus = 'sent';
-      this.emailLinkContextEmail = email;
-      this.emailInput = '';
-      this.showEmailForm = false;
+      await requestDeviceAccount(email, this.language);
+      this.emailStatus = 'emailSent';
+      this.emailContextEmail = email;
+      this.emailStage = 'password';
+      this.passwordInput = '';
     } catch (error) {
-      console.warn('[profile] Failed to send device email link', error);
-      this.emailLinkStatus = 'error';
-      this.emailLinkErrorType = 'failed';
+      console.warn('[profile] Failed to request device account', error);
+      this.emailStatus = 'error';
+      this.emailErrorType = 'send-failed';
     }
   };
 
-  private renderEmailLinkStatus() {
-    const linkCopy = this.translations.emailLink;
-    if (this.emailLinkStatus === 'sending') {
-      return <p class="email-card__status email-card__status--info">{linkCopy.statusSending}</p>;
+  private submitPasswordVerification = async (event: Event) => {
+    event.preventDefault();
+    if (!this.hasFirebase || this.emailStatus === 'verifyingPassword') {
+      return;
     }
-    if (this.emailLinkStatus === 'sent') {
-      return (
-        <p class="email-card__status email-card__status--info">
-          {this.formatEmail(linkCopy.statusSent, this.emailLinkContextEmail)}
-        </p>
-      );
+    const email =
+      this.emailContextEmail || this.emailInput.trim();
+    if (!email) {
+      this.emailStatus = 'error';
+      this.emailErrorType = 'invalid-email';
+      return;
     }
-    if (this.emailLinkStatus === 'success') {
-      return (
-        <p class="email-card__status email-card__status--success">
-          {this.formatEmail(linkCopy.successMessage, this.emailLinkContextEmail)}
-        </p>
-      );
+    const password = this.passwordInput.trim();
+    if (!password || password.length < 8) {
+      this.emailStatus = 'error';
+      this.emailErrorType = 'invalid-password';
+      return;
     }
-    if (this.emailLinkStatus === 'error') {
-      const message =
-        this.emailLinkErrorType === 'invalid'
-          ? linkCopy.invalidEmail
-          : linkCopy.statusError;
-      return (
-        <p class="email-card__status email-card__status--error">{message}</p>
-      );
+    const deviceId = this.deviceId;
+    if (!deviceId) {
+      this.emailStatus = 'error';
+      this.emailErrorType = 'verify-failed';
+      return;
     }
-    return null;
+    this.emailStatus = 'verifyingPassword';
+    this.emailErrorType = null;
+    try {
+      const result = await verifyDeviceAccount(deviceId, email, password);
+      this.emailStatus = 'verified';
+      this.emailContextEmail = result.email ?? email;
+      this.passwordInput = '';
+      this.showEmailForm = false;
+      this.emailStage = null;
+    } catch (error) {
+      console.warn('[profile] Failed to verify device password', error);
+      const firebaseError = error as Partial<FirebaseError> | undefined;
+      if (firebaseError && typeof firebaseError === 'object' && 'code' in firebaseError) {
+        if (firebaseError?.code === 'auth/wrong-password') {
+          this.emailErrorType = 'invalid-password';
+        } else if (firebaseError?.code === 'auth/user-not-found') {
+          this.emailErrorType = 'invalid-email';
+        } else {
+          this.emailErrorType = 'verify-failed';
+        }
+      } else {
+        this.emailErrorType = 'verify-failed';
+      }
+      this.emailStatus = 'error';
+    }
+  };
+
+  private renderEmailAccountStatus() {
+    const accountCopy = this.translations.emailAccount;
+    switch (this.emailStatus) {
+      case 'sendingEmail':
+        return (
+          <p class="email-card__status email-card__status--info">
+            {accountCopy.statusSendingEmail}
+          </p>
+        );
+      case 'emailSent':
+        return (
+          <p class="email-card__status email-card__status--info">
+            {this.formatEmail(accountCopy.statusEmailSent, this.emailContextEmail)}
+          </p>
+        );
+      case 'verifyingPassword':
+        return (
+          <p class="email-card__status email-card__status--info">
+            {accountCopy.statusVerifying}
+          </p>
+        );
+      case 'verified':
+        return (
+          <p class="email-card__status email-card__status--success">
+            {this.formatEmail(accountCopy.statusSuccess, this.emailContextEmail)}
+          </p>
+        );
+      case 'error': {
+        let message = accountCopy.statusVerifyError;
+        if (this.emailErrorType === 'invalid-email') {
+          message = accountCopy.invalidEmail;
+        } else if (this.emailErrorType === 'invalid-password') {
+          message = accountCopy.invalidPassword;
+        } else if (this.emailErrorType === 'send-failed') {
+          message = accountCopy.statusSendError;
+        }
+        return (
+          <p class="email-card__status email-card__status--error">{message}</p>
+        );
+      }
+      default:
+        return null;
+    }
   }
 
-  private renderEmailLinkCard() {
+  private renderEmailAccountCard() {
     if (!this.hasFirebase) {
       return null;
     }
-    const linkCopy = this.translations.emailLink;
+    const accountCopy = this.translations.emailAccount;
     const isLinked = Boolean(this.device?.authUid);
-    const linkedEmail = this.device?.authEmail ?? null;
-    const disableForm = this.emailLinkStatus === 'sending';
+    const linkedEmail = this.device?.authEmail ?? this.emailContextEmail ?? null;
+    const disableEmailForm = this.emailStatus === 'sendingEmail';
+    const disablePasswordForm = this.emailStatus === 'verifyingPassword';
 
     return (
       <section class="email-card">
         <div class="email-card__header">
-          <h2>{linkCopy.title}</h2>
-          <p>{linkCopy.description}</p>
+          <h2>{accountCopy.title}</h2>
+          <p>{accountCopy.description}</p>
         </div>
         {isLinked ? (
           <div class="email-card__linked">
-            <span class="email-card__label">{linkCopy.linkedLabel}</span>
+            <span class="email-card__label">{accountCopy.linkedLabel}</span>
             <span class="email-card__value">{linkedEmail || '—'}</span>
-            <p class="email-card__hint">{linkCopy.linkedHint}</p>
+            <p class="email-card__hint">{accountCopy.linkedHint}</p>
           </div>
         ) : null}
-        {this.showEmailForm ? (
-          <form class="email-card__form" onSubmit={this.submitEmailLink}>
+        {this.showEmailForm && this.emailStage === 'email' ? (
+          <form class="email-card__form" onSubmit={this.submitEmailRequest}>
             <label class="email-card__form-label" htmlFor="profile-email-link">
-              {linkCopy.inputLabel}
+              {accountCopy.emailLabel}
             </label>
             <input
               id="profile-email-link"
               type="email"
               value={this.emailInput}
-              placeholder={linkCopy.inputPlaceholder}
+              placeholder={accountCopy.emailPlaceholder}
               onInput={this.handleEmailInput}
-              disabled={disableForm}
+              disabled={disableEmailForm}
               required
             />
             <div class="email-card__actions">
               <button
                 type="submit"
                 class="email-card__button email-card__button--primary"
-                disabled={disableForm}
+                disabled={disableEmailForm}
               >
-                {linkCopy.submitLabel}
+                {accountCopy.sendLabel}
               </button>
               <button
                 type="button"
                 class="email-card__button"
-                onClick={this.cancelEmailLink}
-                disabled={disableForm}
+                onClick={this.cancelEmailAccountFlow}
+                disabled={disableEmailForm}
               >
-                {linkCopy.cancelLabel}
+                {accountCopy.cancelLabel}
               </button>
             </div>
           </form>
-        ) : (
+        ) : null}
+        {this.showEmailForm && this.emailStage === 'password' ? (
+          <form class="email-card__form" onSubmit={this.submitPasswordVerification}>
+            <label class="email-card__form-label" htmlFor="profile-email-password">
+              {accountCopy.passwordLabel}
+            </label>
+            <input
+              id="profile-email-password"
+              type="text"
+              class="email-card__password-input"
+              value={this.passwordInput}
+              placeholder={accountCopy.passwordPlaceholder}
+              onInput={this.handlePasswordInput}
+              disabled={disablePasswordForm}
+              required
+              autoComplete="one-time-code"
+              maxLength={8}
+            />
+            <p class="email-card__password-hint">{accountCopy.passwordHint}</p>
+            <div class="email-card__actions">
+              <button
+                type="submit"
+                class="email-card__button email-card__button--primary"
+                disabled={disablePasswordForm}
+              >
+                {accountCopy.verifyLabel}
+              </button>
+              <button
+                type="button"
+                class="email-card__button"
+                onClick={this.restartEmailStage}
+                disabled={disablePasswordForm}
+              >
+                {accountCopy.resendLabel}
+              </button>
+              <button
+                type="button"
+                class="email-card__button"
+                onClick={this.cancelEmailAccountFlow}
+                disabled={disablePasswordForm}
+              >
+                {accountCopy.cancelLabel}
+              </button>
+            </div>
+          </form>
+        ) : null}
+        {!this.showEmailForm ? (
           <div class="email-card__actions">
             <button
               type="button"
               class="email-card__button email-card__button--primary"
-              onClick={this.startEmailLink}
+              onClick={this.startEmailAccountFlow}
               disabled={!this.ready}
             >
-              {isLinked ? linkCopy.relinkLabel : linkCopy.actionLabel}
+              {isLinked ? accountCopy.relinkLabel : accountCopy.actionLabel}
             </button>
           </div>
-        )}
+        ) : null}
         <div class="email-card__status-wrapper" aria-live="polite">
-          {this.renderEmailLinkStatus()}
+          {this.renderEmailAccountStatus()}
         </div>
       </section>
     );
@@ -834,7 +1019,7 @@ export class AppProfile {
           <h1>{t.heading}</h1>
           <p>{t.intro}</p>
         </header>
-        {this.renderEmailLinkCard()}
+        {this.renderEmailAccountCard()}
         {!this.ready ? (
           <div class="loading" role="status" aria-live="polite">
             <div class="spinner" />

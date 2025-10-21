@@ -120,6 +120,17 @@
   cursor: not-allowed;
 }
 
+.email-card__password-input {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.email-card__password-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(12, 19, 35, 0.64);
+}
+
 .email-card__actions {
   display: flex;
   flex-wrap: wrap;

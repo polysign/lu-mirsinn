@@ -12,11 +12,14 @@ import {
 import {
   getAuth,
   type Auth,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
-  type UserCredential,
+  signInWithEmailAndPassword,
+  signOut,
 } from 'firebase/auth';
+import {
+  getFunctions,
+  httpsCallable,
+  type Functions,
+} from 'firebase/functions';
 
 export interface LocalizedText {
   lb: string;
@@ -129,6 +132,7 @@ export interface DeviceDocument {
 let appInstance: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
 let authInstance: Auth | null = null;
+let functionsInstance: Functions | null = null;
 
 type FirebaseEnvConfig = {
   apiKey?: string;
@@ -211,148 +215,56 @@ function ensureAuth(): Auth | null {
   return authInstance;
 }
 
-const EMAIL_LINK_STORAGE_KEY = 'mir-sinn-email-link-address';
-export const EMAIL_LINK_SUCCESS_SESSION_KEY = 'mir-sinn-email-link-success';
-
-export function storePendingEmailLink(email: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(EMAIL_LINK_STORAGE_KEY, email);
-  } catch {
-    /* ignore storage errors */
+function ensureFunctions(): Functions | null {
+  if (functionsInstance) {
+    return functionsInstance;
   }
+  const app = ensureApp();
+  if (!app) return null;
+  functionsInstance = getFunctions(app);
+  return functionsInstance;
 }
 
-export function readPendingEmailLink(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage.getItem(EMAIL_LINK_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function clearPendingEmailLink() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.removeItem(EMAIL_LINK_STORAGE_KEY);
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-export function consumeEmailLinkSuccess():
-  | { email: string | null }
-  | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.sessionStorage.getItem(EMAIL_LINK_SUCCESS_SESSION_KEY);
-    if (!raw) return null;
-    window.sessionStorage.removeItem(EMAIL_LINK_SUCCESS_SESSION_KEY);
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object' && 'email' in parsed) {
-        return { email: typeof parsed.email === 'string' ? parsed.email : null };
-      }
-    } catch {
-      /* ignore parse issues */
-    }
-    return { email: null };
-  } catch {
-    return null;
-  }
-}
-
-const EMAIL_LANGUAGE_FALLBACKS: Record<string, string> = {
-  lb: 'de',
-  fr: 'fr',
-  de: 'de',
-  en: 'en',
-};
-
-export async function sendDeviceEmailLink(
+export async function requestDeviceAccount(
   email: string,
   language?: string,
-): Promise<void> {
-  if (typeof window === 'undefined') {
-    throw new Error('Email link can only be sent in a browser environment.');
+): Promise<{ uid?: string; email: string }> {
+  const functions = ensureFunctions();
+  if (!functions) {
+    throw new Error('Firebase functions are not configured.');
   }
+  const callable = httpsCallable<
+    { email: string; language?: string },
+    { uid?: string; email: string }
+  >(functions, 'createDeviceAccount');
+  const result = await callable({ email, language });
+  return result.data;
+}
+
+export async function verifyDeviceAccount(
+  deviceId: string,
+  email: string,
+  password: string,
+): Promise<{ uid: string; email: string | null }> {
   const auth = ensureAuth();
   if (!auth) {
     throw new Error('Firebase auth is not configured.');
   }
-
-  if (language) {
-    const normalized = EMAIL_LANGUAGE_FALLBACKS[language] || language;
-    auth.languageCode = normalized;
-  }
-
-  const actionCodeSettings = {
-    url: `${window.location.origin}/profile`,
-    handleCodeInApp: true,
-    linkDomain: 'mirsinn.lu',
-  };
-
-  await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-  storePendingEmailLink(email);
-}
-
-export async function finalizeDeviceEmailLink(
-  deviceId: string,
-): Promise<{ email: string | null; uid: string } | null> {
-  if (typeof window === 'undefined') return null;
-  const auth = ensureAuth();
-  if (!auth) return null;
-
-  const href = window.location.href;
-  if (!isSignInWithEmailLink(auth, href)) {
-    return null;
-  }
-
-  let email = readPendingEmailLink();
-  if (!email) {
-    try {
-      email = window.prompt(
-        'Please confirm the email address you used to sign in:',
-      );
-    } catch {
-      email = null;
-    }
-    if (!email) {
-      return null;
-    }
-  }
-
-  let credential: UserCredential;
-  try {
-    credential = await signInWithEmailLink(auth, email, href);
-  } catch (error) {
-    console.warn('[firebase] Failed to complete email link sign-in', error);
-    return null;
-  } finally {
-    clearPendingEmailLink();
-  }
-
+  const credential = await signInWithEmailAndPassword(auth, email, password);
   const user = credential.user;
   if (!user) {
-    return null;
+    throw new Error('Authentication failed.');
   }
-
   const resolvedEmail = user.email || email || null;
   await linkDeviceToAuth(deviceId, user.uid, resolvedEmail);
-
   try {
-    window.sessionStorage.setItem(
-      EMAIL_LINK_SUCCESS_SESSION_KEY,
-      JSON.stringify({ email: resolvedEmail }),
-    );
+    await signOut(auth);
   } catch {
-    /* ignore session storage failures */
+    /* ignore sign out errors */
   }
-
   return {
-    email: resolvedEmail,
     uid: user.uid,
+    email: resolvedEmail,
   };
 }
 

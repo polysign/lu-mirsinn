@@ -10,11 +10,13 @@
 const {setGlobalOptions} = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
-const {onRequest} = require("firebase-functions/v2/https");
+const {onRequest, onCall, HttpsError} = require("firebase-functions/v2/https");
 const {defineSecret, defineString} = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const {OpenAI} = require("openai");
 const cheerio = require("cheerio");
+const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -29,6 +31,12 @@ const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_MODEL = defineString("OPENAI_MODEL", {
   defaultValue: "gpt-4.1-mini",
 });
+const SMTP_HOST = defineSecret("SMTP_HOST", {defaultValue: "smtp.sendgrid.net"});
+const SMTP_PORT = defineString("SMTP_PORT", {defaultValue: "587"});
+const SMTP_SECURE = defineString("SMTP_SECURE", {defaultValue: "false"});
+const SMTP_FROM = defineString("SMTP_FROM", {defaultValue: "Mir Sinn <hello@mirsinn.lu>"});
+const SMTP_USER = defineSecret("SMTP_USER");
+const SMTP_PASS = defineSecret("SMTP_PASS");
 
 // For cost control, you can set the maximum number of containers that can be
 // running at the same time. This helps mitigate the impact of unexpected
@@ -41,6 +49,124 @@ const OPENAI_MODEL = defineString("OPENAI_MODEL", {
 // In the v1 API, each function can only serve one request per container, so
 // this will be the maximum concurrent request count.
 setGlobalOptions({maxInstances: 5});
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+function generatePassword(length = 8) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = crypto.randomBytes(length);
+  let password = "";
+  for (let i = 0; i < length; i += 1) {
+    const index = bytes[i] % alphabet.length;
+    password += alphabet.charAt(index);
+  }
+  return password;
+}
+
+const EMAIL_TEMPLATES = {
+  en: (password) => ({
+    subject: "Your Mir Sinn password",
+    text: `Hello,
+
+Here is your Mir Sinn password: ${password}
+
+Open the Mir Sinn app and enter this password on the profile page to link your device.
+
+If you did not request this email you can ignore it.
+`,
+    html: `<p>Hello,</p>
+<p>This is your Mir Sinn password:</p>
+<p style="font-size:20px;font-weight:700;letter-spacing:0.12em;">${password}</p>
+<p>Open the Mir Sinn app and enter this password on the profile page to finish linking your device.</p>
+<p>If you did not request this email you can ignore it.</p>`,
+  }),
+  de: (password) => ({
+    subject: "Dein Mir Sinn Passwort",
+    text: `Hallo,
+
+hier ist dein Mir Sinn Passwort: ${password}
+
+Öffne die Mir Sinn App und gib dieses Passwort im Profil ein, um dein Gerät zu verknüpfen.
+
+Wenn du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren.
+`,
+    html: `<p>Hallo,</p>
+<p>das ist dein Mir Sinn Passwort:</p>
+<p style="font-size:20px;font-weight:700;letter-spacing:0.12em;">${password}</p>
+<p>Öffne die Mir Sinn App und gib dieses Passwort im Profil ein, um dein Gerät zu verknüpfen.</p>
+<p>Wenn du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren.</p>`,
+  }),
+  fr: (password) => ({
+    subject: "Ton mot de passe Mir Sinn",
+    text: `Bonjour,
+
+voici ton mot de passe Mir Sinn : ${password}
+
+Ouvre l’application Mir Sinn et saisis ce mot de passe dans la page Profil pour relier ton appareil.
+
+Si tu n’as pas demandé cet e-mail, ignore-le simplement.
+`,
+    html: `<p>Bonjour,</p>
+<p>voici ton mot de passe Mir Sinn :</p>
+<p style="font-size:20px;font-weight:700;letter-spacing:0.12em;">${password}</p>
+<p>Ouvre l’application Mir Sinn et saisis ce mot de passe dans la page Profil pour relier ton appareil.</p>
+<p>Si tu n’as pas demandé cet e-mail, ignore-le simplement.</p>`,
+  }),
+  lb: (password) => ({
+    subject: "Är Mir Sinn Passwuert",
+    text: `Moien,
+
+hei ass Äert Mir Sinn Passwuert: ${password}
+
+Maacht d'App op a gitt dëst Passwuert am Profil un fir den Apparat ze verknëppen.
+
+Wann Dir dës Ufro net gemaach hutt, kënnt Dir dës Email ignoréieren.
+`,
+    html: `<p>Moien,</p>
+<p>hei ass Äert Mir Sinn Passwuert:</p>
+<p style="font-size:20px;font-weight:700;letter-spacing:0.12em;">${password}</p>
+<p>Maacht d'App op a gitt dëst Passwuert am Profil un fir den Apparat ze verknëppen.</p>
+<p>Wann Dir dës Ufro net gemaach hutt, kënnt Dir dës Email ignoréieren.</p>`,
+  }),
+};
+
+function createMailTransport() {
+  const host = SMTP_HOST.value();
+  const user = SMTP_USER.value();
+  const pass = SMTP_PASS.value();
+  if (!host || !user || !pass) {
+    throw new Error("SMTP configuration is incomplete");
+  }
+  const portValue = Number(SMTP_PORT.value());
+  const port = Number.isFinite(portValue) && portValue > 0 ? portValue : 587;
+  const secureFlag = (SMTP_SECURE.value() || "false").toLowerCase() === "true" || port === 465;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: secureFlag,
+    auth: {
+      user,
+      pass,
+    },
+  });
+}
+
+async function sendPasswordEmail(email, language, password) {
+  const templateFactory = EMAIL_TEMPLATES[(language || "").toLowerCase()] || EMAIL_TEMPLATES.en;
+  const template = templateFactory(password);
+  const from = SMTP_FROM.value() || "moien@mirsinn.lu";
+  const transporter = createMailTransport();
+
+  console.log({from})
+
+  await transporter.sendMail({
+    from,
+    to: email,
+    subject: template.subject,
+    text: template.text,
+    html: template.html,
+  });
+}
 
 async function fetchHtml(url) {
   const response = await fetch(url, {headers: {"User-Agent": "mir-sinn-question-bot/1.0"}});
@@ -299,6 +425,65 @@ async function runDailyQuestionJob() {
   logger.info("Created question of the day", {dateKey, article: topArticle.url});
   return "created";
 }
+
+exports.createDeviceAccount = onCall(
+  {
+    secrets: [SMTP_USER, SMTP_PASS, SMTP_HOST],
+    cors: true,
+  },
+  async (request) => {
+    console.log(SMTP_HOST.value());
+    console.log(SMTP_PORT.value());
+    console.log(SMTP_SECURE.value());
+    console.log(SMTP_FROM.value());
+    console.log(SMTP_USER.value());
+    console.log(SMTP_PASS.value());
+
+    const {email: emailRaw, language} = request.data || {};
+    if (typeof emailRaw !== "string") {
+      throw new HttpsError("invalid-argument", "Email address is required.");
+    }
+
+    const email = emailRaw.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(email)) {
+      throw new HttpsError("invalid-argument", "Invalid email address.");
+    }
+
+    const password = generatePassword(8);
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+      await admin.auth().updateUser(userRecord.uid, {password});
+    } catch (error) {
+      if (error?.code === "auth/user-not-found") {
+        try {
+          userRecord = await admin.auth().createUser({
+            email,
+            password,
+            emailVerified: false,
+            disabled: false,
+          });
+        } catch (createError) {
+          logger.error("Failed to create auth user", {email, error: createError.message});
+          throw new HttpsError("internal", "Failed to create account.");
+        }
+      } else {
+        logger.error("Failed to update auth user", {email, error: error.message});
+        throw new HttpsError("internal", "Failed to update account.");
+      }
+    }
+
+    try {
+      await sendPasswordEmail(email, language, password);
+    } catch (mailError) {
+      logger.error("Failed to send password email", {email, error: mailError.message});
+      throw new HttpsError("internal", "Unable to send password email.");
+    }
+
+    logger.info("Issued Mir Sinn password", {email, uid: userRecord.uid});
+    return {uid: userRecord.uid, email};
+  },
+);
 
 exports.generateQuestionOfTheDay = onSchedule(
   {
