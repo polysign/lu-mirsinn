@@ -233,12 +233,10 @@ export class AppRoot {
     logAnalyticsEvent('sw_update_refresh_clicked', { standalone: false, applied });
     this.applyPendingSwUpdate = undefined;
     this.showUpdateToast = false;
-    if (!applied) {
-      try {
-        window.location.reload();
-      } catch {
-        /* ignore */
-      }
+    try {
+      window.location.reload();
+    } catch {
+      /* ignore */
     }
   };
 
