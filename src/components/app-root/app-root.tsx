@@ -8,6 +8,7 @@ import archiveIcon from '../../assets/icons/regular/archive.svg';
 import userIcon from '../../assets/icons/regular/user.svg';
 import { updateDeviceLanguage } from '../../services/firebase';
 import { logAnalyticsEvent } from '../../services/analytics';
+import { SERVICE_WORKER_UPDATE_EVENT, type ServiceWorkerUpdatePayload } from '../../global/app';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -25,6 +26,46 @@ const installCopy: Record<LanguageCode, string> = {
   en: 'Add Mir Sinn to your homescreen for the quickest access.',
 };
 
+const updateCopy: Record<
+  LanguageCode,
+  {
+    refreshMessage: string;
+    refreshAction: string;
+    dismissAction: string;
+    standaloneMessage: string;
+    standaloneAction: string;
+  }
+> = {
+  lb: {
+    refreshMessage: 'Eng nei Versioun ass disponibel. Aktualiséier d\'Säit fir se ze lueden.',
+    refreshAction: 'Aktualiséieren',
+    dismissAction: 'Spéider',
+    standaloneMessage: 'Eng nei Versioun ass disponibel. Start d\'App nach eng Kéier fir d\'Aktualiséierung.',
+    standaloneAction: 'Verstanen',
+  },
+  fr: {
+    refreshMessage: 'Une nouvelle version est disponible. Actualise la page pour la charger.',
+    refreshAction: 'Actualiser',
+    dismissAction: 'Plus tard',
+    standaloneMessage: "Une nouvelle version est disponible. Redémarre l'application pour terminer la mise à jour.",
+    standaloneAction: 'Compris',
+  },
+  de: {
+    refreshMessage: 'Eine neue Version ist verfügbar. Aktualisiere die Seite, um sie zu laden.',
+    refreshAction: 'Aktualisieren',
+    dismissAction: 'Später',
+    standaloneMessage: 'Eine neue Version ist verfügbar. Starte die App neu, um das Update abzuschließen.',
+    standaloneAction: 'Verstanden',
+  },
+  en: {
+    refreshMessage: 'A new version is available. Refresh the page to load it.',
+    refreshAction: 'Refresh now',
+    dismissAction: 'Later',
+    standaloneMessage: 'A new version is available. Restart the app to finish updating.',
+    standaloneAction: 'Got it',
+  },
+};
+
 @Component({
   tag: 'app-root',
   styleUrls: ['app-root.css'],
@@ -34,12 +75,27 @@ export class AppRoot {
   @State() language: LanguageCode = 'lb';
   @State() currentPath: string = '/';
   @State() showInstallToast = false;
+  @State() showUpdateToast = false;
+  @State() updateIsStandalone = false;
 
   private unsubscribeRouterChange?: () => void;
+  private applyPendingSwUpdate?: () => boolean;
 
   private handlePopState = () => {
     if (typeof window === 'undefined') return;
     this.currentPath = window.location.pathname || '/';
+  };
+
+  private handleServiceWorkerUpdate = (event: Event) => {
+    const custom = event as CustomEvent<ServiceWorkerUpdatePayload>;
+    const detail = custom.detail;
+    if (!detail) {
+      return;
+    }
+    this.applyPendingSwUpdate = detail.applyUpdate;
+    this.updateIsStandalone = detail.isStandalone;
+    this.showUpdateToast = true;
+    logAnalyticsEvent('sw_update_toast_shown', { standalone: detail.isStandalone });
   };
 
   connectedCallback() {
@@ -53,6 +109,7 @@ export class AppRoot {
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
       this.evaluateInstallPrompt();
+      window.addEventListener(SERVICE_WORKER_UPDATE_EVENT, this.handleServiceWorkerUpdate as EventListener);
       this.unsubscribeRouterChange = Router.onChange('url', url => {
         if (url && typeof url.pathname === 'string') {
           this.currentPath = url.pathname;
@@ -64,6 +121,7 @@ export class AppRoot {
   disconnectedCallback() {
     if (typeof window !== 'undefined') {
       window.removeEventListener('popstate', this.handlePopState);
+      window.removeEventListener(SERVICE_WORKER_UPDATE_EVENT, this.handleServiceWorkerUpdate as EventListener);
     }
     if (this.unsubscribeRouterChange) {
       try {
@@ -164,6 +222,32 @@ export class AppRoot {
     logAnalyticsEvent('install_toast_dismissed');
   };
 
+  private confirmServiceWorkerUpdate = () => {
+    if (this.updateIsStandalone) {
+      this.showUpdateToast = false;
+      this.applyPendingSwUpdate = undefined;
+      logAnalyticsEvent('sw_update_acknowledged', { standalone: true });
+      return;
+    }
+    const applied = this.applyPendingSwUpdate ? this.applyPendingSwUpdate() : false;
+    logAnalyticsEvent('sw_update_refresh_clicked', { standalone: false, applied });
+    this.applyPendingSwUpdate = undefined;
+    this.showUpdateToast = false;
+    if (!applied) {
+      try {
+        window.location.reload();
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  private dismissUpdateToast = () => {
+    logAnalyticsEvent('sw_update_dismissed', { standalone: this.updateIsStandalone });
+    this.showUpdateToast = false;
+    this.applyPendingSwUpdate = undefined;
+  };
+
   render() {
     const navLabels: Record<
       LanguageCode,
@@ -175,10 +259,40 @@ export class AppRoot {
       en: { question: 'Question', profile: 'Profile', history: 'History' },
     };
     const labels = navLabels[this.language] || navLabels.lb;
+    const updateLabels = updateCopy[this.language] || updateCopy.lb;
 
     return (
       <div class="app-shell">
-        {this.showInstallToast && (
+        {this.showUpdateToast && (
+          <div class="app-update-toast show" role="status" aria-live="polite">
+            <span>
+              {this.updateIsStandalone
+                ? updateLabels.standaloneMessage
+                : updateLabels.refreshMessage}
+            </span>
+            <div class="app-update-toast__actions">
+              {!this.updateIsStandalone && (
+                <button
+                  class="app-update-toast__button"
+                  type="button"
+                  onClick={this.dismissUpdateToast}
+                >
+                  {updateLabels.dismissAction}
+                </button>
+              )}
+              <button
+                class="app-update-toast__button app-update-toast__button--primary"
+                type="button"
+                onClick={this.confirmServiceWorkerUpdate}
+              >
+                {this.updateIsStandalone
+                  ? updateLabels.standaloneAction
+                  : updateLabels.refreshAction}
+              </button>
+            </div>
+          </div>
+        )}
+        {!this.showUpdateToast && this.showInstallToast && (
           <div class="add-to-home-toast show" role="status" aria-live="polite">
             <span>{installCopy[this.language] || installCopy.lb}</span>
             <button class="toast-dismiss" type="button" onClick={this.dismissToast} aria-label="Dismiss reminder">

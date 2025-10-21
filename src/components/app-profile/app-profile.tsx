@@ -57,20 +57,26 @@ const genderOptions: Array<{
   },
 ];
 
-const cantonAreaLabels: Array<{ value: DeviceLivingArea; label: string }> = [
-  { value: 'esch-sur-alzette', label: 'Esch-sur-Alzette' },
-  { value: 'clervaux', label: 'Clervaux' },
-  { value: 'wiltz', label: 'Wiltz' },
-  { value: 'vianden', label: 'Vianden' },
-  { value: 'dikierch', label: 'Dikierch' },
-  { value: 'redange', label: 'Redange' },
-  { value: 'mersch', label: 'Mersch' },
-  { value: 'echternach', label: 'Echternach' },
-  { value: 'grevenmacher', label: 'Grevenmacher' },
-  { value: 'capellen', label: 'Capellen' },
-  { value: 'luxembourg', label: 'Luxembourg' },
-  { value: 'remich', label: 'Remich' },
+const cantonAreaEntries: Array<[DeviceLivingArea, string]> = [
+  ['capellen', 'Capellen'],
+  ['clervaux', 'Clervaux'],
+  ['dikierch', 'Dikierch'],
+  ['echternach', 'Echternach'],
+  ['esch-sur-alzette', 'Esch-sur-Alzette'],
+  ['grevenmacher', 'Grevenmacher'],
+  ['luxembourg', 'Luxembourg'],
+  ['mersch', 'Mersch'],
+  ['redange', 'Redange'],
+  ['remich', 'Remich'],
+  ['vianden', 'Vianden'],
+  ['wiltz', 'Wiltz'],
 ];
+
+const cantonAreaLabels: Array<{ value: DeviceLivingArea; label: string }> = [
+  ...cantonAreaEntries,
+]
+  .sort((a, b) => a[1].localeCompare(b[1]))
+  .map(([value, label]) => ({ value, label }));
 
 const livingAreaOptions: Array<{
   value: DeviceLivingArea;
@@ -288,12 +294,18 @@ export class AppProfile {
   private subscriptionRetry?: number;
   private saveDebounce?: number;
   private statusResetTimeout?: number;
+  private genderSelect?: HTMLSelectElement;
+  private livingSelect?: HTMLSelectElement;
 
   @Watch('language')
   handleLanguageChange() {
     if (this.saveState === 'error') {
       this.errorMessage = null;
     }
+  }
+
+  componentDidRender() {
+    this.syncSelectValues();
   }
 
   componentWillLoad() {
@@ -467,6 +479,21 @@ export class AppProfile {
     this.updateProfile({ livingIn: value ? value : null });
   };
 
+  private syncSelectValues() {
+    if (this.genderSelect) {
+      const next = this.draft.gender ?? '';
+      if (this.genderSelect.value !== next) {
+        this.genderSelect.value = next;
+      }
+    }
+    if (this.livingSelect) {
+      const next = this.draft.livingIn ?? '';
+      if (this.livingSelect.value !== next) {
+        this.livingSelect.value = next;
+      }
+    }
+  }
+
   private get translations(): ProfileCopy {
     return copy[this.language] || copy.lb;
   }
@@ -523,7 +550,10 @@ export class AppProfile {
               <label htmlFor="profile-gender">{t.genderLabel}</label>
               <select
                 id="profile-gender"
-                onInput={this.handleGenderChange}
+                ref={el => {
+                  this.genderSelect = el as HTMLSelectElement | undefined;
+                }}
+                onChange={this.handleGenderChange}
                 disabled={disableInputs}
               >
                 <option value="" selected={this.draft.gender == null}>
@@ -569,7 +599,10 @@ export class AppProfile {
               <label htmlFor="profile-living">{t.livingLabel}</label>
               <select
                 id="profile-living"
-                onInput={this.handleLivingChange}
+                ref={el => {
+                  this.livingSelect = el as HTMLSelectElement | undefined;
+                }}
+                onChange={this.handleLivingChange}
                 disabled={disableInputs}
               >
                 <option value="" selected={this.draft.livingIn == null}>

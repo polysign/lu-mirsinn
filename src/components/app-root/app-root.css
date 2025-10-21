@@ -31,6 +31,67 @@
   pointer-events: auto;
 }
 
+.app-update-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--nav-height) + 1.5rem);
+  transform: translate(-50%, 20px);
+  background: rgba(18, 21, 26, 0.95);
+  color: #fff;
+  padding: 1rem 1.25rem;
+  border-radius: 16px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+  width: calc(100% - 2rem);
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 600;
+}
+
+.app-update-toast.show {
+  pointer-events: auto;
+  animation: toast-slide-in 0.6s ease forwards;
+}
+
+.app-update-toast__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.app-update-toast__button {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: inherit;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.app-update-toast__button:hover,
+.app-update-toast__button:focus {
+  background: rgba(255, 255, 255, 0.28);
+  outline: none;
+}
+
+.app-update-toast__button--primary {
+  background: #00a1de;
+  color: #0c1b2c;
+  font-weight: 600;
+}
+
+.app-update-toast__button--primary:hover,
+.app-update-toast__button--primary:focus {
+  background: #00b4f3;
+}
+
 .app-shell {
   min-height: 100vh;
   background: var(--app-surface, #f7f9fb);

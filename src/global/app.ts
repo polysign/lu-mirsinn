@@ -7,6 +7,13 @@ import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 let shouldReloadOnControllerChange = false;
 let reloadHandled = false;
 
+export const SERVICE_WORKER_UPDATE_EVENT = 'mir-sinn-sw-update';
+
+export interface ServiceWorkerUpdatePayload {
+  applyUpdate: () => boolean;
+  isStandalone: boolean;
+}
+
 const isStandaloneDisplayMode = () => {
   if (typeof window === 'undefined') {
     return false;
@@ -30,24 +37,51 @@ const registerServiceWorker = async () => {
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
 
-    const triggerSkipWaiting = (worker: ServiceWorker | null) => {
-      if (!autoReloadEnabled) {
+    const emitUpdateEvent = () => {
+      if (typeof window === 'undefined') {
         return;
       }
-      if (worker && worker.state === 'installed' && navigator.serviceWorker.controller) {
-        shouldReloadOnControllerChange = true;
-        worker.postMessage({ type: 'SKIP_WAITING' });
+      const waiting = registration.waiting;
+      if (!waiting) {
+        return;
       }
+      if (!navigator.serviceWorker.controller) {
+        return;
+      }
+      const detail: ServiceWorkerUpdatePayload = {
+        isStandalone: !autoReloadEnabled,
+        applyUpdate: () => {
+          const worker = registration.waiting;
+          if (!worker) {
+            return false;
+          }
+          try {
+            if (autoReloadEnabled) {
+              shouldReloadOnControllerChange = true;
+            }
+            worker.postMessage({ type: 'SKIP_WAITING' });
+            return true;
+          } catch (error) {
+            console.warn('[sw] Failed to trigger skipWaiting on new worker', error);
+            return false;
+          }
+        },
+      };
+      window.dispatchEvent(new CustomEvent<ServiceWorkerUpdatePayload>(SERVICE_WORKER_UPDATE_EVENT, { detail }));
     };
 
-    if (registration.waiting) {
-      triggerSkipWaiting(registration.waiting);
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      emitUpdateEvent();
     }
 
     registration.addEventListener('updatefound', () => {
       const newWorker = registration.installing;
       if (!newWorker) return;
-      newWorker.addEventListener('statechange', () => triggerSkipWaiting(newWorker));
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed') {
+          emitUpdateEvent();
+        }
+      });
     });
 
     navigator.serviceWorker.addEventListener('controllerchange', () => {
