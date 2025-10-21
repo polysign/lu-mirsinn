@@ -53,6 +53,55 @@ export interface AnswerDocument {
   answeredAt: string;
 }
 
+export type DeviceGender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
+
+export type DeviceLivingArea =
+  | 'esch-sur-alzette'
+  | 'clervaux'
+  | 'wiltz'
+  | 'vianden'
+  | 'dikierch'
+  | 'redange'
+  | 'mersch'
+  | 'echternach'
+  | 'grevenmacher'
+  | 'capellen'
+  | 'luxembourg'
+  | 'remich'
+  | 'outside-luxembourg'
+  | 'prefer_not_to_say';
+
+export interface DeviceProfile {
+  gender?: DeviceGender | null;
+  age?: number | null;
+  livingIn?: DeviceLivingArea | null;
+  updatedAt?: string | null;
+}
+
+const DEVICE_GENDERS: ReadonlyArray<DeviceGender> = [
+  'male',
+  'female',
+  'other',
+  'prefer_not_to_say',
+];
+
+const DEVICE_LIVING_AREAS: ReadonlyArray<DeviceLivingArea> = [
+  'esch-sur-alzette',
+  'clervaux',
+  'wiltz',
+  'vianden',
+  'dikierch',
+  'redange',
+  'mersch',
+  'echternach',
+  'grevenmacher',
+  'capellen',
+  'luxembourg',
+  'remich',
+  'outside-luxembourg',
+  'prefer_not_to_say',
+];
+
 export interface DeviceDocument {
   deviceId: string;
   points: number;
@@ -63,6 +112,7 @@ export interface DeviceDocument {
   language?: string | null;
   createdAt?: string | null;
   lastAnsweredAt?: string | null;
+  profile?: DeviceProfile | null;
 }
 
 let appInstance: FirebaseApp | null = null;
@@ -305,6 +355,7 @@ export async function ensureDeviceDocument(
         language: null,
         createdAt: new Date().toISOString(),
         lastAnsweredAt: null,
+        profile: null,
       };
       await Promise.all([
         setDoc(deviceRef, docData),
@@ -341,6 +392,9 @@ export async function ensureDeviceDocument(
     }
     if (!('fcmToken' in data)) {
       update.fcmToken = null;
+    }
+    if (!('profile' in data)) {
+      update.profile = null;
     }
     let awardedReferrer = false;
     if (referrerCode && !data.referrer && referrerCode !== data.shortCode) {
@@ -432,6 +486,44 @@ export async function updateDeviceLanguage(deviceId: string, language: string) {
     );
   } catch (error) {
     console.warn('[firebase] Unable to store device language', error);
+  }
+}
+
+export async function updateDeviceProfile(
+  deviceId: string,
+  profile: DeviceProfile,
+) {
+  const db = ensureFirestore();
+  if (!db || !deviceId) return;
+  try {
+    await ensureDeviceDocument(deviceId);
+    const deviceRef = doc(db, 'devices', deviceId);
+    const sanitized: DeviceProfile = {
+      ...profile,
+      age:
+        typeof profile.age === 'number'
+          ? Math.min(100, Math.max(14, Math.round(profile.age)))
+          : null,
+      gender: DEVICE_GENDERS.includes(profile.gender as DeviceGender)
+        ? profile.gender
+        : null,
+      livingIn: DEVICE_LIVING_AREAS.includes(
+        profile.livingIn as DeviceLivingArea,
+      )
+        ? profile.livingIn
+        : null,
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(
+      deviceRef,
+      {
+        deviceId,
+        profile: sanitized,
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.warn('[firebase] Unable to update device profile', error);
   }
 }
 

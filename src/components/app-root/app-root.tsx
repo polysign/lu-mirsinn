@@ -5,6 +5,7 @@ import type { LanguageCode } from '../../types/language';
 import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
 import archiveIcon from '../../assets/icons/regular/archive.svg';
+import userIcon from '../../assets/icons/regular/user.svg';
 import { updateDeviceLanguage } from '../../services/firebase';
 import { logAnalyticsEvent } from '../../services/analytics';
 
@@ -164,11 +165,14 @@ export class AppRoot {
   };
 
   render() {
-    const navLabels: Record<LanguageCode, { question: string; history: string }> = {
-      lb: { question: 'Fro', history: 'Archiv' },
-      fr: { question: 'Question', history: 'Historique' },
-      de: { question: 'Frage', history: 'Verlauf' },
-      en: { question: 'Question', history: 'History' },
+    const navLabels: Record<
+      LanguageCode,
+      { question: string; profile: string; history: string }
+    > = {
+      lb: { question: 'Fro', profile: 'Profil', history: 'Archiv' },
+      fr: { question: 'Question', profile: 'Profil', history: 'Historique' },
+      de: { question: 'Frage', profile: 'Profil', history: 'Verlauf' },
+      en: { question: 'Question', profile: 'Profile', history: 'History' },
     };
     const labels = navLabels[this.language] || navLabels.lb;
 
@@ -214,6 +218,9 @@ export class AppRoot {
             <Route path="/">
               <app-home language={this.language} />
             </Route>
+            <Route path="/profile">
+              <app-profile language={this.language} />
+            </Route>
             <Route path="/history">
               <app-history language={this.language} />
             </Route>
@@ -233,6 +240,19 @@ export class AppRoot {
               <img src={sealQuestionIcon} alt="" />
             </span>
             <span>{labels.question}</span>
+          </button>
+          <button
+            class={{
+              'nav-button': true,
+              active: this.currentPath.startsWith('/profile'),
+            }}
+            onClick={() => this.navigate('/profile')}
+            aria-label="Profile"
+          >
+            <span class="nav-icon">
+              <img src={userIcon} alt="" />
+            </span>
+            <span>{labels.profile}</span>
           </button>
           <button
             class={{

@@ -171,12 +171,11 @@
   left: 0;
   right: 0;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   border-top: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(6px);
   min-height: var(--nav-height);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 150;
 }
 
@@ -195,6 +194,7 @@
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .nav-button.active {

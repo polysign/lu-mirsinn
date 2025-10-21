@@ -10,6 +10,6 @@ describe('app-root', () => {
     expect(title.textContent).toEqual('Mir Sinn');
 
     const navButtons = await page.findAll('app-root >>> .nav-button');
-    expect(navButtons.length).toBe(2);
+    expect(navButtons.length).toBe(3);
   });
 });
