@@ -371,16 +371,31 @@ async function sendNotificationsForQuestion(dateKey, questionDoc) {
   }
 
   const devices = [];
+  const initialCleanupPromises = [];
   snapshot.forEach(docSnap => {
     const data = docSnap.data() || {};
-    const token = data.fcmToken;
-    if (!token) return;
+    const rawToken = data.fcmToken;
+    const token = typeof rawToken === "string" ? rawToken.trim() : null;
+
+    if (!token) {
+      if (rawToken) {
+        const ref = db.doc(`devices/${docSnap.id}`);
+        initialCleanupPromises.push(ref.set({fcmToken: null}, {merge: true}));
+      }
+      return;
+    }
+
     devices.push({
       id: docSnap.id,
       token,
       language: normaliseLanguage(data.language),
     });
   });
+
+  if (initialCleanupPromises.length) {
+    logger.info("Cleaning up invalid device tokens", {count: initialCleanupPromises.length});
+    await Promise.allSettled(initialCleanupPromises);
+  }
 
   if (!devices.length) {
     logger.info("No usable tokens after filtering.");
@@ -445,6 +460,7 @@ async function sendNotificationsForQuestion(dateKey, questionDoc) {
           language,
           count: deviceChunk.length,
           error: error.message,
+          code: error.code || null,
         });
       }
     }
