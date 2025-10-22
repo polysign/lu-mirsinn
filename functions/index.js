@@ -8,6 +8,7 @@
  */
 
 const {setGlobalOptions} = require("firebase-functions/v2");
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 const logger = require("firebase-functions/logger");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onRequest, onCall, HttpsError} = require("firebase-functions/v2/https");
@@ -37,6 +38,8 @@ const SMTP_SECURE = defineString("SMTP_SECURE", {defaultValue: "false"});
 const SMTP_FROM = defineString("SMTP_FROM", {defaultValue: "Mir Sinn <hello@mirsinn.lu>"});
 const SMTP_USER = defineSecret("SMTP_USER");
 const SMTP_PASS = defineSecret("SMTP_PASS");
+const INSTAGRAM_ACCESS_TOKEN = defineSecret("INSTAGRAM_ACCESS_TOKEN");
+const INSTAGRAM_USER_ID = defineString("INSTAGRAM_USER_ID");
 
 // For cost control, you can set the maximum number of containers that can be
 // running at the same time. This helps mitigate the impact of unexpected
@@ -978,6 +981,306 @@ async function reconcileLinkedDeviceDocuments() {
     groupsUpdated: updatedGroups,
   };
 }
+
+async function generateInstagramImage(questionText) {
+  if (!questionText) {
+    throw new Error("Cannot generate Instagram image without question text");
+  }
+  const client = getOpenAIClient();
+  const response = await client.images.generate({
+    model: "gpt-image-1",
+    prompt: `Create a square 1024x1024 illustration inspired by the following daily question for the Mir Sinn community in Luxembourg.
+             Render the scene in a vibrant, modern take on American superhero comic books, in a futuristic style, featuring Luxembourgish cultural elements where relevant.
+             Avoid adding any text or lettering.
+
+Question: "${questionText}"
+`,
+    size: "1024x1024",
+    n: 1,
+  });
+
+  const imagePayload = response.data?.[0]?.b64_json;
+  if (!imagePayload) {
+    throw new Error("OpenAI did not return image data");
+  }
+  return Buffer.from(imagePayload, "base64");
+}
+
+async function uploadInstagramImage(storageKey, buffer) {
+  if (!buffer?.length) {
+    throw new Error("No image buffer provided for upload");
+  }
+  const bucket = admin.storage().bucket();
+  const file = bucket.file(storageKey);
+  await file.save(buffer, {
+    contentType: "image/png",
+    metadata: {
+      cacheControl: "public, max-age=3600",
+    },
+  });
+
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  const [signedUrl] = await file.getSignedUrl({
+    action: "read",
+    expires: expiresAt,
+  });
+
+  return {
+    signedUrl,
+    storagePath: storageKey,
+    expiresAt,
+  };
+}
+
+function buildInstagramCaption(questionDoc) {
+  const question = questionDoc?.question || {};
+  const questionText = question.lb || question.en || question.de || question.fr || "Share your voice with Mir Sinn.";
+  const lines = [
+    questionText,
+    "",
+    "Vote now: https://mirsinn.lu",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+async function waitForInstagramContainer(creationId, accessToken, maxAttempts = 10, delayMs = 3000) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const statusUrl = new URL(`https://graph.instagram.com/v24.0/${creationId}`);
+    statusUrl.searchParams.set("fields", "status_code,status,message,error_message");
+    statusUrl.searchParams.set("access_token", accessToken);
+    const statusResponse = await fetch(statusUrl, {method: "GET"});
+    const statusJson = await statusResponse.json().catch(() => ({}));
+    if (!statusResponse.ok) {
+      throw new Error(`Failed to check Instagram media status: ${statusJson.error?.message || statusResponse.statusText}`);
+    }
+
+    const statusCode = statusJson.status_code;
+    if (statusCode === "FINISHED") {
+      return statusJson;
+    }
+    if (statusCode === "ERROR") {
+      throw new Error(statusJson.error_message || "Instagram media processing failed");
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error("Timed out waiting for Instagram media to be ready");
+}
+
+async function createInstagramPost(imageUrl, caption) {
+  const igUserId = INSTAGRAM_USER_ID.value();
+  const accessToken = INSTAGRAM_ACCESS_TOKEN.value();
+  if (!igUserId) {
+    throw new Error("INSTAGRAM_USER_ID is not configured");
+  }
+  if (!accessToken) {
+    throw new Error("INSTAGRAM_ACCESS_TOKEN is not configured");
+  }
+
+  const mediaEndpoint = `https://graph.instagram.com/v24.0/${igUserId}/media`;
+  const params = new URLSearchParams({
+    image_url: imageUrl,
+    caption,
+    access_token: accessToken,
+  });
+  const creationResponse = await fetch(mediaEndpoint, {
+    method: "POST",
+    body: params,
+  });
+  const creationJson = await creationResponse.json().catch(() => ({}));
+  if (!creationResponse.ok) {
+    throw new Error(`Instagram media creation failed: ${creationJson.error?.message || creationResponse.statusText}`);
+  }
+
+  const creationId = creationJson.id;
+  if (!creationId) {
+    throw new Error("Instagram media creation response missing id");
+  }
+
+  await waitForInstagramContainer(creationId, accessToken);
+
+  const publishResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({
+      creation_id: creationId,
+      access_token: accessToken,
+    }),
+  });
+  const publishJson = await publishResponse.json().catch(() => ({}));
+  if (!publishResponse.ok) {
+    throw new Error(`Instagram publish failed: ${publishJson.error?.message || publishResponse.statusText}`);
+  }
+
+  return {
+    creationId,
+    postId: publishJson.id || null,
+    publishResponse: publishJson,
+  };
+}
+
+async function publishQuestionToInstagramDoc(questionRef, questionDoc, dateKey, options = {}) {
+  const force = Boolean(options.force);
+  if (!questionDoc) {
+    logger.warn("Instagram publish requested without question document", {dateKey});
+    return {status: "skipped", reason: "missing_question_doc"};
+  }
+
+  if (
+    !force &&
+    questionDoc.instagram?.status === "published" &&
+    questionDoc.instagram?.postId
+  ) {
+    logger.info("Instagram post already recorded for question", {
+      dateKey,
+      postId: questionDoc.instagram.postId,
+    });
+    return {status: "skipped", reason: "already_published", postId: questionDoc.instagram.postId};
+  }
+
+  const questionText =
+    questionDoc.question?.lb ||
+    questionDoc.question?.en ||
+    questionDoc.question?.de ||
+    questionDoc.question?.fr;
+
+  if (!questionText) {
+    logger.warn("Question text missing for Instagram generation", {dateKey});
+    await questionRef.set(
+      {
+        instagram: {
+          status: "skipped",
+          reason: "missing_question_text",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    return {status: "skipped", reason: "missing_question_text"};
+  }
+
+  try {
+    logger.info("Generating Instagram image for question", {dateKey, force});
+    const imageBuffer = await generateInstagramImage(questionText);
+    const storageKey = `instagram/${dateKey}-${Date.now()}.png`;
+    const uploadResult = await uploadInstagramImage(storageKey, imageBuffer);
+    const caption = buildInstagramCaption(questionDoc);
+    logger.info("Publishing Instagram post", {dateKey, force});
+    const publishResult = await createInstagramPost(uploadResult.signedUrl, caption);
+
+    await questionRef.set(
+      {
+        instagram: {
+          status: "published",
+          postId: publishResult.postId,
+          creationId: publishResult.creationId,
+          caption,
+          imagePath: uploadResult.storagePath,
+          publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+
+    logger.info("Instagram post published", {dateKey, postId: publishResult.postId, force});
+    return {status: "published", postId: publishResult.postId, creationId: publishResult.creationId};
+  } catch (error) {
+    logger.error("Failed to publish Instagram post", {dateKey, error: error.message, force});
+    await questionRef.set(
+      {
+        instagram: {
+          status: "error",
+          error: error.message,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    throw error;
+  }
+}
+
+exports.publishQuestionToInstagram = onDocumentCreated(
+  {
+    document: "questions/{dateKey}",
+    secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
+    timeoutSeconds: 300,
+  },
+  async (event) => {
+    const snapshot = event.data;
+    const dateKey = event.params?.dateKey || snapshot?.id || "unknown";
+    if (!snapshot) {
+      logger.warn("publishQuestionToInstagram triggered without snapshot", {dateKey});
+      return null;
+    }
+
+    const questionDoc = snapshot.data();
+    return publishQuestionToInstagramDoc(snapshot.ref, questionDoc, dateKey, {force: false});
+  },
+);
+
+exports.publishQuestionToInstagramOnDemand = onRequest(
+  {
+    secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
+    timeoutSeconds: 300,
+  },
+  async (req, res) => {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "POST") {
+      res.set("Allow", "GET, POST");
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    let body = {};
+    if (method === "POST") {
+      if (typeof req.body === "string") {
+        try {
+          body = JSON.parse(req.body);
+        } catch {
+          body = {};
+        }
+      } else if (req.body && typeof req.body === "object") {
+        body = req.body;
+      }
+    }
+
+    const dateParam =
+      (typeof (body.date ?? "") === "string" && body.date.trim()) ||
+      (typeof req.query?.date === "string" && req.query.date.trim()) ||
+      "";
+    const dateKey = dateParam || getLuxDateKey();
+
+    const forceParam =
+      body.force ??
+      req.query?.force ??
+      false;
+    const force =
+      typeof forceParam === "string"
+        ? ["1", "true", "yes", "force"].includes(forceParam.toLowerCase())
+        : Boolean(forceParam);
+
+    logger.info("On-demand Instagram publish requested", {dateKey, force});
+
+    try {
+      const questionRef = db.doc(`questions/${dateKey}`);
+      const snapshot = await questionRef.get();
+      if (!snapshot.exists) {
+        res.status(404).json({error: `Question ${dateKey} not found`, dateKey});
+        return;
+      }
+
+      const questionDoc = snapshot.data();
+      const result = await publishQuestionToInstagramDoc(questionRef, questionDoc, dateKey, {force});
+      res.json({
+        dateKey,
+        force,
+        ...result,
+      });
+    } catch (error) {
+      logger.error("Failed to publish Instagram post on demand", {dateKey, error: error.message});
+      res.status(500).json({error: error.message, dateKey});
+    }
+  },
+);
 
 exports.sendQuestionNotifications = onSchedule(
   {

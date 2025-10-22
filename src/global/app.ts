@@ -7,9 +7,6 @@ import { registerMessagingForDevice } from '../services/messaging';
 import { initAnalytics, logAnalyticsEvent } from '../services/analytics';
 import { firebaseConfig, hasFirebaseConfig } from '../config/firebase-config';
 
-let shouldReloadOnControllerChange = false;
-let reloadHandled = false;
-
 export const SERVICE_WORKER_UPDATE_EVENT = 'mir-sinn-sw-update';
 
 export interface ServiceWorkerUpdatePayload {
@@ -59,9 +56,6 @@ const registerServiceWorker = async () => {
             return false;
           }
           try {
-            if (autoReloadEnabled) {
-              shouldReloadOnControllerChange = true;
-            }
             worker.postMessage({ type: 'SKIP_WAITING' });
             return true;
           } catch (error) {
@@ -85,17 +79,6 @@ const registerServiceWorker = async () => {
           emitUpdateEvent();
         }
       });
-    });
-
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!autoReloadEnabled) {
-        return;
-      }
-      if (!shouldReloadOnControllerChange || reloadHandled) {
-        return;
-      }
-      reloadHandled = true;
-      window.location.reload();
     });
   } catch (err) {
     console.warn('[sw] Failed to register service worker', err);

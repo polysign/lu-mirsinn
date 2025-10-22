@@ -26,46 +26,6 @@ const installCopy: Record<LanguageCode, string> = {
   en: 'Add Mir Sinn to your homescreen for the quickest access.',
 };
 
-const updateCopy: Record<
-  LanguageCode,
-  {
-    refreshMessage: string;
-    refreshAction: string;
-    dismissAction: string;
-    standaloneMessage: string;
-    standaloneAction: string;
-  }
-> = {
-  lb: {
-    refreshMessage: 'Eng nei Versioun ass disponibel. Aktualiséier d\'Säit fir se ze lueden.',
-    refreshAction: 'Aktualiséieren',
-    dismissAction: 'Spéider',
-    standaloneMessage: 'Eng nei Versioun ass disponibel. Start d\'App nach eng Kéier fir d\'Aktualiséierung.',
-    standaloneAction: 'Verstanen',
-  },
-  fr: {
-    refreshMessage: 'Une nouvelle version est disponible. Actualise la page pour la charger.',
-    refreshAction: 'Actualiser',
-    dismissAction: 'Plus tard',
-    standaloneMessage: "Une nouvelle version est disponible. Redémarre l'application pour terminer la mise à jour.",
-    standaloneAction: 'Compris',
-  },
-  de: {
-    refreshMessage: 'Eine neue Version ist verfügbar. Aktualisiere die Seite, um sie zu laden.',
-    refreshAction: 'Aktualisieren',
-    dismissAction: 'Später',
-    standaloneMessage: 'Eine neue Version ist verfügbar. Starte die App neu, um das Update abzuschließen.',
-    standaloneAction: 'Verstanden',
-  },
-  en: {
-    refreshMessage: 'A new version is available. Refresh the page to load it.',
-    refreshAction: 'Refresh now',
-    dismissAction: 'Later',
-    standaloneMessage: 'A new version is available. Restart the app to finish updating.',
-    standaloneAction: 'Got it',
-  },
-};
-
 @Component({
   tag: 'app-root',
   styleUrls: ['app-root.css'],
@@ -75,11 +35,8 @@ export class AppRoot {
   @State() language: LanguageCode = 'lb';
   @State() currentPath: string = '/';
   @State() showInstallToast = false;
-  @State() showUpdateToast = false;
-  @State() updateIsStandalone = false;
 
   private unsubscribeRouterChange?: () => void;
-  private applyPendingSwUpdate?: () => boolean;
 
   private handlePopState = () => {
     if (typeof window === 'undefined') return;
@@ -92,10 +49,13 @@ export class AppRoot {
     if (!detail) {
       return;
     }
-    this.applyPendingSwUpdate = detail.applyUpdate;
-    this.updateIsStandalone = detail.isStandalone;
-    this.showUpdateToast = true;
-    logAnalyticsEvent('sw_update_toast_shown', { standalone: detail.isStandalone });
+    let applied = false;
+    try {
+      applied = detail.applyUpdate();
+    } catch (error) {
+      console.warn('[sw] Failed to apply update automatically', error);
+    }
+    logAnalyticsEvent('sw_update_auto_applied', { standalone: detail.isStandalone, applied });
   };
 
   connectedCallback() {
@@ -105,6 +65,13 @@ export class AppRoot {
         this.language = stored;
         this.persistLanguage(stored);
         this.persistLanguageToServer(stored);
+      } else {
+        const detected = this.detectBrowserLanguage();
+        if (detected) {
+          this.language = detected;
+          this.persistLanguage(detected);
+          this.persistLanguageToServer(detected);
+        }
       }
       this.currentPath = window.location.pathname || '/';
       window.addEventListener('popstate', this.handlePopState);
@@ -169,6 +136,34 @@ export class AppRoot {
     return null;
   }
 
+  private detectBrowserLanguage(): LanguageCode | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    try {
+      const nav = window.navigator;
+      if (!nav) return null;
+      const supported = new Set(languages.map(lang => lang.code));
+      const candidates: string[] = [];
+      if (Array.isArray(nav.languages)) {
+        candidates.push(...nav.languages);
+      }
+      if (typeof nav.language === 'string') {
+        candidates.push(nav.language);
+      }
+      for (const code of candidates) {
+        if (!code) continue;
+        const base = code.toLowerCase().split(/[-_]/)[0];
+        if (supported.has(base as LanguageCode)) {
+          return base as LanguageCode;
+        }
+      }
+    } catch {
+      /* ignore detection issues */
+    }
+    return null;
+  }
+
   private persistLanguage(lang: LanguageCode) {
     try {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
@@ -222,31 +217,6 @@ export class AppRoot {
     logAnalyticsEvent('install_toast_dismissed');
   };
 
-  private confirmServiceWorkerUpdate = () => {
-    const applied = this.applyPendingSwUpdate ? this.applyPendingSwUpdate() : false;
-
-    if (this.updateIsStandalone) {
-      logAnalyticsEvent('sw_update_acknowledged', { standalone: true, applied });
-      this.showUpdateToast = false;
-      this.applyPendingSwUpdate = undefined;
-      return;
-    }
-    logAnalyticsEvent('sw_update_refresh_clicked', { standalone: false, applied });
-    this.applyPendingSwUpdate = undefined;
-    this.showUpdateToast = false;
-    try {
-      window.location.reload();
-    } catch {
-      /* ignore */
-    }
-  };
-
-  private dismissUpdateToast = () => {
-    logAnalyticsEvent('sw_update_dismissed', { standalone: this.updateIsStandalone });
-    this.showUpdateToast = false;
-    this.applyPendingSwUpdate = undefined;
-  };
-
   render() {
     const navLabels: Record<
       LanguageCode,
@@ -258,40 +228,9 @@ export class AppRoot {
       en: { question: 'Question', profile: 'Profile', history: 'History' },
     };
     const labels = navLabels[this.language] || navLabels.lb;
-    const updateLabels = updateCopy[this.language] || updateCopy.lb;
-
     return (
       <div class="app-shell">
-        {this.showUpdateToast && (
-          <div class="app-update-toast show" role="status" aria-live="polite">
-            <span>
-              {this.updateIsStandalone
-                ? updateLabels.standaloneMessage
-                : updateLabels.refreshMessage}
-            </span>
-            <div class="app-update-toast__actions">
-              {!this.updateIsStandalone && (
-                <button
-                  class="app-update-toast__button"
-                  type="button"
-                  onClick={this.dismissUpdateToast}
-                >
-                  {updateLabels.dismissAction}
-                </button>
-              )}
-              <button
-                class="app-update-toast__button app-update-toast__button--primary"
-                type="button"
-                onClick={this.confirmServiceWorkerUpdate}
-              >
-                {this.updateIsStandalone
-                  ? updateLabels.standaloneAction
-                  : updateLabels.refreshAction}
-              </button>
-            </div>
-          </div>
-        )}
-        {!this.showUpdateToast && this.showInstallToast && (
+        {this.showInstallToast && (
           <div class="add-to-home-toast show" role="status" aria-live="polite">
             <span>{installCopy[this.language] || installCopy.lb}</span>
             <button class="toast-dismiss" type="button" onClick={this.dismissToast} aria-label="Dismiss reminder">
