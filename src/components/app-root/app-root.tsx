@@ -223,13 +223,14 @@ export class AppRoot {
   };
 
   private confirmServiceWorkerUpdate = () => {
+    const applied = this.applyPendingSwUpdate ? this.applyPendingSwUpdate() : false;
+
     if (this.updateIsStandalone) {
+      logAnalyticsEvent('sw_update_acknowledged', { standalone: true, applied });
       this.showUpdateToast = false;
       this.applyPendingSwUpdate = undefined;
-      logAnalyticsEvent('sw_update_acknowledged', { standalone: true });
       return;
     }
-    const applied = this.applyPendingSwUpdate ? this.applyPendingSwUpdate() : false;
     logAnalyticsEvent('sw_update_refresh_clicked', { standalone: false, applied });
     this.applyPendingSwUpdate = undefined;
     this.showUpdateToast = false;

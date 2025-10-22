@@ -857,6 +857,128 @@ async function runDailyNotificationJob() {
   return {status: "sent", sentCount};
 }
 
+function resolveTimestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toMillis();
+  }
+  if (typeof value.toDate === "function") {
+    try {
+      return value.toDate().getTime();
+    } catch (error) {
+      logger.warn("Failed to convert timestamp-like value", {error: error.message});
+    }
+  }
+  return 0;
+}
+
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+async function reconcileLinkedDeviceDocuments() {
+  const snapshot = await db.collection("devices").get();
+  if (snapshot.empty) {
+    logger.info("No devices found for reconciliation");
+    return {status: "no_devices"};
+  }
+
+  const devicesByAuth = new Map();
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    const authUid = data.authUid;
+    if (!authUid) return;
+    if (!devicesByAuth.has(authUid)) {
+      devicesByAuth.set(authUid, []);
+    }
+    devicesByAuth.get(authUid).push({
+      id: docSnap.id,
+      data,
+    });
+  });
+
+  if (!devicesByAuth.size) {
+    logger.info("No linked devices found for reconciliation");
+    return {status: "no_linked_devices"};
+  }
+
+  let updatedGroups = 0;
+
+  for (const [authUid, entries] of devicesByAuth.entries()) {
+    if (!entries.length) continue;
+
+    const sortedByLinkTime = entries
+      .slice()
+      .sort((a, b) => resolveTimestampMillis(b.data.authLinkedAt) - resolveTimestampMillis(a.data.authLinkedAt));
+    const target = sortedByLinkTime[0];
+    if (!target) continue;
+
+    const numericMax = new Map();
+    for (const entry of entries) {
+      const record = entry.data || {};
+      for (const [key, value] of Object.entries(record)) {
+        if (!isFiniteNumber(value)) continue;
+        const current = numericMax.get(key);
+        if (current == null || value > current) {
+          numericMax.set(key, value);
+        }
+      }
+    }
+
+    let mostRecentProfile = null;
+    let mostRecentProfileMillis = 0;
+    for (const entry of entries) {
+      const profile = entry.data?.profile;
+      if (!profile) continue;
+      const millis = resolveTimestampMillis(profile.updatedAt);
+      if (millis > mostRecentProfileMillis) {
+        mostRecentProfileMillis = millis;
+        mostRecentProfile = profile;
+      }
+    }
+
+    const updateData = {};
+    for (const [key, maxValue] of numericMax.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(target.data, key) || !isFiniteNumber(target.data[key]) || target.data[key] < maxValue) {
+        updateData[key] = maxValue;
+      }
+    }
+
+    if (mostRecentProfile) {
+      const currentProfileMillis = resolveTimestampMillis(target.data?.profile?.updatedAt);
+      if (!target.data?.profile || mostRecentProfileMillis > currentProfileMillis) {
+        updateData.profile = mostRecentProfile;
+      }
+    }
+
+    if (!Object.keys(updateData).length) continue;
+
+    updateData.deviceId = target.data.deviceId || target.id;
+
+    await db.doc(`devices/${target.id}`).set(updateData, {merge: true});
+    updatedGroups += 1;
+    logger.info("Reconciled linked device", {authUid, target: target.id, updates: Object.keys(updateData)});
+  }
+
+  logger.info("Linked device reconciliation completed", {
+    groupsProcessed: devicesByAuth.size,
+    groupsUpdated: updatedGroups,
+  });
+
+  return {
+    status: "completed",
+    groupsProcessed: devicesByAuth.size,
+    groupsUpdated: updatedGroups,
+  };
+}
+
 exports.sendQuestionNotifications = onSchedule(
   {
     schedule: "0 8 * * *",
@@ -865,6 +987,14 @@ exports.sendQuestionNotifications = onSchedule(
   async () => {
     return runDailyNotificationJob();
   },
+);
+
+exports.reconcileLinkedDevices = onSchedule(
+  {
+    schedule: "0 * * * *",
+    timeZone: LUX_TZ,
+  },
+  async () => reconcileLinkedDeviceDocuments(),
 );
 
 async function refreshHistoricalStats() {
