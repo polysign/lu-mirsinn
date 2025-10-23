@@ -1092,7 +1092,8 @@ async function createReelVideoFromImage(imageBuffer, options = {}) {
   const frameCount = Math.max(1, Math.round(durationSeconds * fps));
   const zoomExpr = `min(zoom+${zoomIncrement.toFixed(4)},${maxZoom})`;
   const filterGraph = [
-    `scale=${width}:${height}:force_original_aspect_ratio=cover`,
+    `scale=${width}:${height}:force_original_aspect_ratio=increase`,
+    `crop=${width}:${height}`,
     `zoompan=z='${zoomExpr}':d=${frameCount}:s=${width}x${height}`,
     `fps=${fps}`,
   ].join(",");
