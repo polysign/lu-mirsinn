@@ -1119,6 +1119,8 @@ async function createReelVideoFromImage(imageBuffer, options = {}) {
     videoPath,
   ];
 
+  logger.info(ffmpegArgs.join(" "));
+
   let videoBuffer;
   try {
     await runFfmpeg(ffmpegArgs);

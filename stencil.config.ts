@@ -12,7 +12,13 @@ export const config: Config = {
       empty: true,
       serviceWorker: {
         swSrc: 'src/sw.js',
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,json}'],
+        globPatterns: [
+          'build/**/*.{js,css,json}',
+          'index.html',
+          'manifest.json',
+          'assets/icon/**/*.{png,svg,ico}',
+        ],
+        globIgnores: ['assets/icons/**'],
       },
       baseUrl: 'https://mir-sinn.lu/',
       copy: [

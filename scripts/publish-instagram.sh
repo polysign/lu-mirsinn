@@ -25,7 +25,7 @@ if [[ -n "$DATE_VALUE" && ! "$DATE_VALUE" =~ ^[0-1][0-9]-[0-3][0-9]-[0-9]{4}$ ]]
 fi
 
 if [[ -n "$DATE_VALUE" ]]; then
-  PAYLOAD=$(printf '{"date":"%s"}' "$DATE_VALUE")
+  PAYLOAD=$(printf '{"date":"%s", "force":1}' "$DATE_VALUE")
 else
   PAYLOAD='{}'
 fi
