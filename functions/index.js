@@ -18,6 +18,11 @@ const {OpenAI} = require("openai");
 const cheerio = require("cheerio");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const fs = require("fs/promises");
+const os = require("os");
+const path = require("path");
+const {spawn} = require("child_process");
+const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -990,8 +995,8 @@ async function generateInstagramImage(questionText) {
   const response = await client.images.generate({
     model: "gpt-image-1",
     prompt: `Create a square 1024x1024 illustration inspired by the following daily question for the Mir Sinn community in Luxembourg.
-             Render the scene in a vibrant, modern take on American superhero comic books, in a futuristic style, featuring Luxembourgish cultural elements where relevant.
-             Avoid adding any text or lettering.
+             Render the scene in a vibrant, modern take on American comic books, in a futuristic style, featuring Luxembourgish cultural elements where relevant.
+             Avoid adding any text or lettering. Also include the current weather in luxembourg city as a subtle background element.
 
 Question: "${questionText}"
 `,
@@ -1032,6 +1037,123 @@ async function uploadInstagramImage(storageKey, buffer) {
   };
 }
 
+async function uploadInstagramVideo(storageKey, buffer) {
+  if (!buffer?.length) {
+    throw new Error("No video buffer provided for upload");
+  }
+  const bucket = admin.storage().bucket();
+  const file = bucket.file(storageKey);
+  await file.save(buffer, {
+    contentType: "video/mp4",
+    metadata: {
+      cacheControl: "public, max-age=3600",
+    },
+  });
+  return {
+    storagePath: storageKey,
+  };
+}
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpegInstaller.path, args, {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+async function createReelVideoFromImage(imageBuffer, options = {}) {
+  if (!imageBuffer?.length) {
+    throw new Error("Image buffer required to create reel video");
+  }
+
+  const width = options.width || 1080;
+  const height = options.height || 1920;
+  const durationSeconds = options.durationSeconds || 3;
+  const fps = options.fps || 30;
+  const zoomIncrement = options.zoomIncrement ?? 0.0025;
+  const maxZoom = options.maxZoom ?? 1.05;
+
+  const tmpDir = os.tmpdir();
+  const uniqueId = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+  const imagePath = path.join(tmpDir, `mirsinn-${uniqueId}.png`);
+  const videoPath = path.join(tmpDir, `mirsinn-${uniqueId}.mp4`);
+
+  await fs.writeFile(imagePath, imageBuffer);
+
+  const frameCount = Math.max(1, Math.round(durationSeconds * fps));
+  const zoomExpr = `min(zoom+${zoomIncrement.toFixed(4)},${maxZoom})`;
+  const filterGraph = [
+    `scale=${width}:${height}:force_original_aspect_ratio=cover`,
+    `zoompan=z='${zoomExpr}':d=${frameCount}:s=${width}x${height}`,
+    `fps=${fps}`,
+  ].join(",");
+
+  const ffmpegArgs = [
+    "-y",
+    "-loop",
+    "1",
+    "-i",
+    imagePath,
+    "-t",
+    String(durationSeconds),
+    "-vf",
+    filterGraph,
+    "-c:v",
+    "libx264",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-an",
+    "-r",
+    String(fps),
+    videoPath,
+  ];
+
+  let videoBuffer;
+  try {
+    await runFfmpeg(ffmpegArgs);
+    videoBuffer = await fs.readFile(videoPath);
+  } finally {
+    await Promise.allSettled([fs.unlink(imagePath), fs.unlink(videoPath)]);
+  }
+
+  return {
+    buffer: videoBuffer,
+    width,
+    height,
+    durationSeconds,
+    fps,
+  };
+}
+
+async function getSignedUrlForStoragePath(storagePath, expiresInMs = 60 * 60 * 1000) {
+  if (!storagePath) {
+    throw new Error("Storage path required for signed URL");
+  }
+  const bucket = admin.storage().bucket();
+  const file = bucket.file(storagePath);
+  const [exists] = await file.exists();
+  if (!exists) {
+    throw new Error(`Storage file not found: ${storagePath}`);
+  }
+  const expiresAt = new Date(Date.now() + expiresInMs);
+  const [signedUrl] = await file.getSignedUrl({
+    action: "read",
+    expires: expiresAt,
+  });
+  return {signedUrl, expiresAt};
+}
+
 function buildInstagramCaption(questionDoc) {
   const question = questionDoc?.question || {};
   const questionText = question.lb || question.en || question.de || question.fr || "Share your voice with Mir Sinn.";
@@ -1046,7 +1168,7 @@ function buildInstagramCaption(questionDoc) {
 async function waitForInstagramContainer(creationId, accessToken, maxAttempts = 10, delayMs = 3000) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const statusUrl = new URL(`https://graph.instagram.com/v24.0/${creationId}`);
-    statusUrl.searchParams.set("fields", "status_code,status,message,error_message");
+    statusUrl.searchParams.set("fields", "status_code,status,error_message");
     statusUrl.searchParams.set("access_token", accessToken);
     const statusResponse = await fetch(statusUrl, {method: "GET"});
     const statusJson = await statusResponse.json().catch(() => ({}));
@@ -1117,6 +1239,65 @@ async function createInstagramPost(imageUrl, caption) {
   };
 }
 
+async function createInstagramReel(videoUrl, caption, options = {}) {
+  const igUserId = INSTAGRAM_USER_ID.value();
+  const accessToken = INSTAGRAM_ACCESS_TOKEN.value();
+  if (!igUserId) {
+    throw new Error("INSTAGRAM_USER_ID is not configured");
+  }
+  if (!accessToken) {
+    throw new Error("INSTAGRAM_ACCESS_TOKEN is not configured");
+  }
+
+  const params = new URLSearchParams({
+    media_type: "REELS",
+    video_url: videoUrl,
+    caption,
+    access_token: accessToken,
+  });
+
+  if (options.coverUrl) {
+    params.set("cover_photo_url", options.coverUrl);
+  }
+  if (typeof options.thumbOffset === "number") {
+    params.set("thumb_offset", String(options.thumbOffset));
+  }
+
+  const creationResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media`, {
+    method: "POST",
+    body: params,
+  });
+  const creationJson = await creationResponse.json().catch(() => ({}));
+  if (!creationResponse.ok) {
+    throw new Error(`Instagram reel creation failed: ${creationJson.error?.message || creationResponse.statusText}`);
+  }
+
+  const creationId = creationJson.id;
+  if (!creationId) {
+    throw new Error("Instagram reel creation response missing id");
+  }
+
+  await waitForInstagramContainer(creationId, accessToken);
+
+  const publishResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({
+      creation_id: creationId,
+      access_token: accessToken,
+    }),
+  });
+  const publishJson = await publishResponse.json().catch(() => ({}));
+  if (!publishResponse.ok) {
+    throw new Error(`Instagram reel publish failed: ${publishJson.error?.message || publishResponse.statusText}`);
+  }
+
+  return {
+    creationId,
+    postId: publishJson.id || null,
+    publishResponse: publishJson,
+  };
+}
+
 async function publishQuestionToInstagramDoc(questionRef, questionDoc, dateKey, options = {}) {
   const force = Boolean(options.force);
   if (!questionDoc) {
@@ -1160,25 +1341,71 @@ async function publishQuestionToInstagramDoc(questionRef, questionDoc, dateKey, 
   try {
     logger.info("Generating Instagram image for question", {dateKey, force});
     const imageBuffer = await generateInstagramImage(questionText);
-    const storageKey = `instagram/${dateKey}-${Date.now()}.png`;
-    const uploadResult = await uploadInstagramImage(storageKey, imageBuffer);
+    const timestamp = Date.now();
+    const imageStorageKey = `instagram/${dateKey}-${timestamp}.png`;
+    const uploadResult = await uploadInstagramImage(imageStorageKey, imageBuffer);
+
+    let reelVideoUpload = null;
+    let reelMeta = null;
+    try {
+      const reelVideo = await createReelVideoFromImage(imageBuffer);
+      const {buffer: reelBuffer, durationSeconds, width, height, fps} = reelVideo;
+      const videoStorageKey = `instagram/reels/${dateKey}-${timestamp}.mp4`;
+      reelVideoUpload = await uploadInstagramVideo(videoStorageKey, reelBuffer);
+      reelMeta = {durationSeconds, width, height, fps};
+      logger.info("Generated reel video from Instagram image", {
+        dateKey,
+        videoPath: reelVideoUpload.storagePath,
+        duration: durationSeconds,
+      });
+    } catch (videoError) {
+      logger.error("Failed to generate reel video from Instagram image", {
+        dateKey,
+        error: videoError.message,
+      });
+    }
+
     const caption = buildInstagramCaption(questionDoc);
     logger.info("Publishing Instagram post", {dateKey, force});
     const publishResult = await createInstagramPost(uploadResult.signedUrl, caption);
 
-    await questionRef.set(
-      {
-        instagram: {
-          status: "published",
-          postId: publishResult.postId,
-          creationId: publishResult.creationId,
-          caption,
-          imagePath: uploadResult.storagePath,
-          publishedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
+    const updatePayload = {
+      instagram: {
+        status: "published",
+        postId: publishResult.postId,
+        creationId: publishResult.creationId,
+        caption,
+        imagePath: uploadResult.storagePath,
+        publishedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      {merge: true},
-    );
+    };
+
+    if (reelVideoUpload) {
+      const existingReel = questionDoc.instagramReel || {};
+      const nextStatus =
+        existingReel.status === "published" && existingReel.postId ? "published" : "ready";
+      const readyTimestamp =
+        nextStatus === "ready"
+          ? admin.firestore.FieldValue.serverTimestamp()
+          : existingReel.readyAt || admin.firestore.FieldValue.serverTimestamp();
+      updatePayload.instagramReel = {
+        status: nextStatus,
+        videoPath: reelVideoUpload.storagePath,
+        videoStoragePath: reelVideoUpload.storagePath,
+        generatedVideoPath: reelVideoUpload.storagePath,
+        coverImagePath: uploadResult.storagePath,
+        caption,
+        durationSeconds: reelMeta?.durationSeconds ?? 3,
+        width: reelMeta?.width ?? 1080,
+        height: reelMeta?.height ?? 1920,
+        fps: reelMeta?.fps ?? 30,
+        source: "auto_generated_image",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        readyAt: readyTimestamp,
+      };
+    }
+
+    await questionRef.set(updatePayload, {merge: true});
 
     logger.info("Instagram post published", {dateKey, postId: publishResult.postId, force});
     return {status: "published", postId: publishResult.postId, creationId: publishResult.creationId};
@@ -1277,6 +1504,203 @@ exports.publishQuestionToInstagramOnDemand = onRequest(
       });
     } catch (error) {
       logger.error("Failed to publish Instagram post on demand", {dateKey, error: error.message});
+      res.status(500).json({error: error.message, dateKey});
+    }
+  },
+);
+
+async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateKey, options = {}) {
+  const force = Boolean(options.force);
+  if (!questionDoc) {
+    logger.warn("Instagram reel publish requested without question document", {dateKey});
+    return {status: "skipped", reason: "missing_question_doc"};
+  }
+
+  const existingStatus = questionDoc.instagramReel?.status;
+  const existingPostId = questionDoc.instagramReel?.postId;
+  if (!force && existingStatus === "published" && existingPostId) {
+    logger.info("Instagram reel already published for question", {dateKey, postId: existingPostId});
+    return {status: "skipped", reason: "already_published", postId: existingPostId};
+  }
+
+  const reelInfo = questionDoc.instagramReel || questionDoc.reel || {};
+  const videoPath =
+    reelInfo.videoPath ||
+    reelInfo.videoStoragePath ||
+    reelInfo.generatedVideoPath ||
+    null;
+  if (!videoPath) {
+    logger.warn("No reel video path available for question", {dateKey});
+    await questionRef.set(
+      {
+        instagramReel: {
+          status: "skipped",
+          reason: "missing_video",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    return {status: "skipped", reason: "missing_video"};
+  }
+
+  let signedVideo;
+  try {
+    signedVideo = await getSignedUrlForStoragePath(videoPath);
+  } catch (error) {
+    logger.error("Unable to sign reel video URL", {dateKey, videoPath, error: error.message});
+    await questionRef.set(
+      {
+        instagramReel: {
+          status: "error",
+          error: `video_signing_failed: ${error.message}`,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    throw error;
+  }
+
+  let coverUrl = null;
+  let coverPath =
+    reelInfo.coverImagePath ||
+    reelInfo.coverPath ||
+    questionDoc.instagram?.imagePath ||
+    null;
+  if (coverPath) {
+    try {
+      const signedCover = await getSignedUrlForStoragePath(coverPath);
+      coverUrl = signedCover.signedUrl;
+    } catch (error) {
+      logger.warn("Unable to sign reel cover image URL, proceeding without cover", {
+        dateKey,
+        coverPath,
+        error: error.message,
+      });
+      coverUrl = null;
+    }
+  }
+
+  const caption = reelInfo.caption || buildInstagramCaption(questionDoc);
+  try {
+    logger.info("Publishing Instagram reel", {dateKey, force});
+    const publishResult = await createInstagramReel(signedVideo.signedUrl, caption, {coverUrl});
+    const reelUpdate = {
+      status: "published",
+      postId: publishResult.postId,
+      creationId: publishResult.creationId,
+      caption,
+      videoPath,
+      coverImagePath: coverPath || null,
+      publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (reelInfo.durationSeconds) reelUpdate.durationSeconds = reelInfo.durationSeconds;
+    if (reelInfo.width) reelUpdate.width = reelInfo.width;
+    if (reelInfo.height) reelUpdate.height = reelInfo.height;
+    if (reelInfo.fps) reelUpdate.fps = reelInfo.fps;
+    if (reelInfo.source) reelUpdate.source = reelInfo.source;
+    if (reelInfo.readyAt) reelUpdate.readyAt = reelInfo.readyAt;
+    if (reelInfo.videoStoragePath) reelUpdate.videoStoragePath = reelInfo.videoStoragePath;
+    if (reelInfo.generatedVideoPath) reelUpdate.generatedVideoPath = reelInfo.generatedVideoPath;
+
+    await questionRef.set(
+      {
+        instagramReel: reelUpdate,
+      },
+      {merge: true},
+    );
+    logger.info("Instagram reel published", {dateKey, postId: publishResult.postId, force});
+    return {status: "published", postId: publishResult.postId, creationId: publishResult.creationId};
+  } catch (error) {
+    logger.error("Failed to publish Instagram reel", {dateKey, error: error.message, force});
+    await questionRef.set(
+      {
+        instagramReel: {
+          status: "error",
+          error: error.message,
+          videoPath,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    throw error;
+  }
+}
+
+async function runInstagramReelPublish(dateKey, options = {}) {
+  const questionRef = db.doc(`questions/${dateKey}`);
+  const snapshot = await questionRef.get();
+  if (!snapshot.exists) {
+    logger.warn("No question document found for reel publish", {dateKey});
+    return {status: "not_found", dateKey};
+  }
+  const questionDoc = snapshot.data();
+  return publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateKey, options);
+}
+
+exports.publishQuestionReelDaily = onSchedule(
+  {
+    schedule: "0 7 * * *",
+    timeZone: LUX_TZ,
+    secrets: [INSTAGRAM_ACCESS_TOKEN],
+  },
+  async () => {
+    const dateKey = getLuxDateKey();
+    return runInstagramReelPublish(dateKey, {force: false});
+  },
+);
+
+exports.publishQuestionReelOnDemand = onRequest(
+  {
+    secrets: [INSTAGRAM_ACCESS_TOKEN],
+    timeoutSeconds: 300,
+  },
+  async (req, res) => {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "POST") {
+      res.set("Allow", "GET, POST");
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    let body = {};
+    if (method === "POST") {
+      if (typeof req.body === "string") {
+        try {
+          body = JSON.parse(req.body);
+        } catch {
+          body = {};
+        }
+      } else if (req.body && typeof req.body === "object") {
+        body = req.body;
+      }
+    }
+
+    const dateParam =
+      (typeof (body.date ?? "") === "string" && body.date.trim()) ||
+      (typeof req.query?.date === "string" && req.query.date.trim()) ||
+      "";
+    const dateKey = dateParam || getLuxDateKey();
+
+    const forceParam = body.force ?? req.query?.force ?? false;
+    const force =
+      typeof forceParam === "string"
+        ? ["1", "true", "yes", "force"].includes(forceParam.toLowerCase())
+        : Boolean(forceParam);
+
+    logger.info("On-demand Instagram reel publish requested", {dateKey, force});
+    try {
+      const result = await runInstagramReelPublish(dateKey, {force});
+      res.json({
+        dateKey,
+        force,
+        ...result,
+      });
+    } catch (error) {
+      logger.error("Failed to publish Instagram reel on demand", {dateKey, error: error.message});
       res.status(500).json({error: error.message, dateKey});
     }
   },

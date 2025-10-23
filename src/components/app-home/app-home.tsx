@@ -20,12 +20,14 @@ type QuestionCacheEntry = {
   dateKey: string | null;
   question: QuestionDocument | null;
   alreadyAnswered: boolean;
+  selectedOption: string | null;
 };
 
 const questionCache: QuestionCacheEntry = {
   dateKey: null,
   question: null,
   alreadyAnswered: false,
+  selectedOption: null,
 };
 
 interface ViewState {
@@ -359,6 +361,7 @@ export class AppHome {
         question: questionCache.question,
         alreadyAnswered: questionCache.alreadyAnswered,
       };
+      this.selectedOption = questionCache.selectedOption;
       this.overlayVisible = false;
       return;
     }
@@ -416,6 +419,7 @@ export class AppHome {
       questionCache.dateKey = this.todayKey;
       questionCache.question = question;
       questionCache.alreadyAnswered = alreadyAnswered;
+      questionCache.selectedOption = selectedOption;
       logAnalyticsEvent('question_loaded', {
         dateKey: this.todayKey,
         hasQuestion: Boolean(question),
@@ -435,6 +439,7 @@ export class AppHome {
       questionCache.dateKey = null;
       questionCache.question = null;
       questionCache.alreadyAnswered = false;
+      questionCache.selectedOption = null;
       this.scheduleOverlayRemoval();
     }
   }
@@ -632,6 +637,10 @@ export class AppHome {
         alreadyAnswered: true,
         errorKey: undefined,
       };
+      questionCache.dateKey = this.todayKey;
+      questionCache.question = this.state.question || questionCache.question;
+      questionCache.alreadyAnswered = true;
+      questionCache.selectedOption = this.selectedOption;
       this.shareStatus = 'idle';
       if (this.deviceId) {
         registerMessagingForDevice(this.deviceId, true);
