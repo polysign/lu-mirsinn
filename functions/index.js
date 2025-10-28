@@ -8,7 +8,7 @@
  */
 
 const {setGlobalOptions} = require("firebase-functions/v2");
-const {onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {onDocumentCreated, onDocumentWritten} = require("firebase-functions/v2/firestore");
 const logger = require("firebase-functions/logger");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onRequest, onCall, HttpsError} = require("firebase-functions/v2/https");
@@ -32,6 +32,42 @@ const db = admin.firestore();
 const messaging = admin.messaging();
 const LUX_TZ = "Europe/Luxembourg";
 const RTL_NEWS_URL = "https://www.rtl.lu/news/national";
+const LANGUAGE_PRIORITY = ["lb", "fr", "de", "en"];
+const JINA_PROXY_PREFIX = "https://r.jina.ai/";
+
+const NEWS_SOURCES = [
+  {
+    id: "rtl-national",
+    label: "RTL.lu National",
+    listingUrl: "https://www.rtl.lu/news/national",
+    strategy: "rtl",
+  },
+  {
+    id: "lessentiel-luxembourg",
+    label: "L'essentiel Luxembourg",
+    listingUrl: "https://www.lessentiel.lu/fr/luxembourg",
+    strategy: "proxied-text",
+  },
+  {
+    id: "wort-luxemburg",
+    label: "Luxemburger Wort",
+    listingUrl: "https://www.wort.lu/luxemburg/",
+    strategy: "proxied-text",
+  },
+  {
+    id: "tageblatt-sport",
+    label: "Tageblatt Sport",
+    listingUrl: "https://www.tageblatt.lu/category/sport/",
+    strategy: "proxied-text",
+  },
+  {
+    id: "tageblatt-luxemburg",
+    label: "Tageblatt Luxemburg",
+    listingUrl: "https://www.tageblatt.lu/category/nachrichten/luxemburg/",
+    strategy: "proxied-text",
+  },
+];
+const QUESTION_TARGET_COUNT = 5;
 
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 const OPENAI_MODEL = defineString("OPENAI_MODEL", {
@@ -59,6 +95,46 @@ const INSTAGRAM_USER_ID = defineString("INSTAGRAM_USER_ID");
 setGlobalOptions({maxInstances: 5});
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+function normalizeTextValue(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    for (const key of LANGUAGE_PRIORITY) {
+      if (typeof value[key] === "string") {
+        return value[key];
+      }
+    }
+    const firstString = Object.values(value).find((entry) => typeof entry === "string");
+    if (typeof firstString === "string") {
+      return firstString;
+    }
+  }
+  return "";
+}
+
+function getQuestionSignature(question) {
+  if (!question) return "";
+  const tokens = [];
+  if (typeof question === "string") {
+    const value = question.trim().toLowerCase();
+    if (value) tokens.push(value);
+  } else if (typeof question === "object") {
+    for (const language of LANGUAGE_PRIORITY) {
+      const text = question[language];
+      if (typeof text === "string") {
+        const value = text.trim().toLowerCase();
+        if (value) tokens.push(value);
+      }
+    }
+    if (!tokens.length) {
+      const fallback = normalizeTextValue(question).trim().toLowerCase();
+      if (fallback) tokens.push(fallback);
+    }
+  }
+  return tokens.join("|");
+}
 
 function generatePassword(length = 8) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -184,6 +260,42 @@ async function fetchHtml(url) {
   return await response.text();
 }
 
+function buildProxiedNewsUrl(targetUrl) {
+  if (!targetUrl) return null;
+  if (targetUrl.startsWith(JINA_PROXY_PREFIX)) {
+    return targetUrl;
+  }
+  return `${JINA_PROXY_PREFIX}${targetUrl}`;
+}
+
+async function fetchReadableText(url) {
+  const proxied = buildProxiedNewsUrl(url);
+  if (!proxied) {
+    throw new Error("Invalid URL for readable fetch");
+  }
+  return fetchHtml(proxied);
+}
+
+async function fetchListingContentForSource(source) {
+  if (!source?.listingUrl) {
+    throw new Error("Source listing URL missing");
+  }
+
+  try {
+    if (source.strategy === "rtl") {
+      return await fetchReadableText(source.listingUrl);
+    }
+    return await fetchReadableText(source.listingUrl);
+  } catch (error) {
+    logger.error("Failed to fetch listing content", {
+      sourceId: source.id,
+      listingUrl: source.listingUrl,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
 function normalizeUrl(url) {
   if (!url) return null;
   if (url.startsWith("http")) return url;
@@ -265,17 +377,24 @@ function getLuxDateKey(date = new Date()) {
   return `${month}-${day}-${year}`;
 }
 
-async function generateQuestionPayload(listingHtml, articleHtml, context, openaiClient, model) {
-  const prompt = `Read the HTML from the RTL.lu national news listing and the selected article in full. Identify the article with the most comments and craft a concise, balanced daily poll question.
+async function generateQuestionPayloadForSource({source, listingContent, context, openaiClient, model}) {
+  if (!source || !listingContent) {
+    throw new Error("Missing source data for question generation");
+  }
+
+  const prompt = `You will read the proxied Markdown snapshot of a Luxembourg news listing at ${source.listingUrl}. Select one timely article that has not been covered recently and craft a multilingual Mir Sinn poll question.
 
 Requirements:
-- Output strict JSON with the schema:
+- Respond with strict JSON only using this schema:
 {
   "article": {
     "title": "...",
     "url": "...",
     "summary": {"lb": "...", "fr": "...", "de": "...", "en": "..."}
   },
+  "tags": [
+    {"lb": "...", "fr": "...", "de": "...", "en": "..."}
+  ],
   "question": {"lb": "...", "fr": "...", "de": "...", "en": "..."},
   "options": [
     {"id": "yes", "label": {"lb": "...", "fr": "...", "de": "...", "en": "..."}},
@@ -287,27 +406,33 @@ Requirements:
     "body": {"lb": "...", "fr": "...", "de": "...", "en": "..."}
   }
 }
-- Provide 2 to 4 answer options with short, neutral phrasings.
-- Keep each text under 200 characters.
-- Question and summaries must be translated into Luxembourgish (lb), French (fr), German (de), and English (en).
-- Use simple apostrophes (') and ASCII characters wherever possible.
-- The question should directly relate to the article's core issue and be suitable for a quick opinion poll.
-- The analysis should briefly explain why the question matters today.
-- You must not reuse topics that overlap with the recent articles listed in [recent_articles]. Select a different subject if necessary.
+- Stay under 200 characters per text field.
+- Use Luxembourgish (lb), French (fr), German (de) and English (en) for all textual fields. Provide natural, concise translations.
+- Provide 2 to 4 neutral answer options with unique ids and short labels.
+- Provide 1 to 3 tags that categorise the topic; keep tags under 40 characters and translate each tag into lb, fr, de and en.
+- The question must directly relate to the chosen article and stand on its own.
+- The analysis must state why the topic matters today.
+- Avoid URLs or titles listed in [forbidden_articles].
+- Avoid reusing topics that overlap with [recent_articles].
+- Prefer non-political angles if the last three articles in [recent_articles] were political.
+- The output must use ASCII apostrophes (') when needed.
 
-Respond with JSON only, without explanations or code fences.`;
+Return valid JSON only with no commentary.`;
 
   const messages = [
-    {role: "system", content: "You are an assistant that turns RTL.lu articles into multilingual daily poll questions. You must respond with valid JSON only."},
+    {
+      role: "system",
+      content: "You create balanced, multilingual daily poll questions for Mir Sinn. Always return valid JSON matching the expected schema.",
+    },
     {
       role: "user",
-      content: `${prompt}\n\n[listing_html]\n${listingHtml}\n\n[selected_article_html]\n${articleHtml}\n\n[recent_articles]\n${JSON.stringify(context.recentArticles || [])}\n\n[context]\n${JSON.stringify(context)}`,
+      content: `${prompt}\n\n[source]\n${JSON.stringify({id: source.id, label: source.label, listingUrl: source.listingUrl})}\n\n[listing_markdown]\n${listingContent}\n\n[recent_articles]\n${JSON.stringify(context.recentArticles || [])}\n\n[forbidden_articles]\n${JSON.stringify(context.forbiddenArticles || [])}`,
     },
   ];
 
   const response = await openaiClient.chat.completions.create({
     model,
-    temperature: 0.7,
+    temperature: 0.6,
     response_format: {type: "json_object"},
     messages,
   });
@@ -325,7 +450,8 @@ Respond with JSON only, without explanations or code fences.`;
   }
 }
 
-function buildQuestionDocument(payload, articleMeta, dateKey, model) {
+function buildQuestionDocument(payload, meta) {
+  const {dateKey, model, source, order, listingExcerpt} = meta || {};
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
   const perOption = {};
   const options = (payload.options || []).map((option, index) => {
@@ -337,18 +463,65 @@ function buildQuestionDocument(payload, articleMeta, dateKey, model) {
     };
   });
 
+  const article = {
+    title: payload.article?.title || "",
+    url: payload.article?.url || null,
+    summary: payload.article?.summary || null,
+  };
+  const supportedTagLanguages = ["lb", "fr", "de", "en"];
+  const tags = Array.isArray(payload.tags)
+    ? payload.tags
+        .slice(0, 3)
+        .map((tag) => {
+          if (!tag || typeof tag !== "object") return null;
+          const fallback =
+            typeof tag.en === "string" && tag.en.trim()
+              ? tag.en.trim()
+              : typeof tag.lb === "string" && tag.lb.trim()
+              ? tag.lb.trim()
+              : typeof tag.fr === "string" && tag.fr.trim()
+              ? tag.fr.trim()
+              : typeof tag.de === "string" && tag.de.trim()
+              ? tag.de.trim()
+              : "";
+          if (!fallback) return null;
+          const normalized = {};
+          supportedTagLanguages.forEach((lang) => {
+            const value =
+              typeof tag[lang] === "string" && tag[lang].trim()
+                ? tag[lang].trim()
+                : fallback;
+            normalized[lang] = String(value).slice(0, 40);
+          });
+          return normalized;
+        })
+        .filter(Boolean)
+    : [];
+  const uniqueTags = [];
+  const seenTags = new Set();
+  tags.forEach((tag) => {
+    const key = supportedTagLanguages.map((lang) => tag[lang]?.toLowerCase()?.trim()).join("|");
+    if (!seenTags.has(key)) {
+      seenTags.add(key);
+      uniqueTags.push(tag);
+    }
+  });
+
   return {
     dateKey,
+    order: typeof order === "number" ? order : null,
     question: payload.question,
     options,
-    article: {
-      title: payload.article?.title || articleMeta.title,
-      url: payload.article?.url || articleMeta.url,
-      summary: payload.article?.summary || null,
-      comments: articleMeta.comments,
-    },
+    article,
+    tags: uniqueTags,
     analysis: payload.analysis || null,
     notification: payload.notification || null,
+    newsSource: {
+      id: source?.id || null,
+      label: source?.label || null,
+      listingUrl: source?.listingUrl || null,
+    },
+    listingExcerpt: listingExcerpt || null,
     results: {
       totalResponses: 0,
       perOption,
@@ -359,7 +532,10 @@ function buildQuestionDocument(payload, articleMeta, dateKey, model) {
       generatedAt: timestamp,
       model,
       promptVersion: "2025-02-20",
+      listingStrategy: source?.strategy || null,
     },
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
 }
 
@@ -378,10 +554,24 @@ async function fetchRecentArticles(currentDateKey, days = 3) {
       if (!docSnap.exists) continue;
       const data = docSnap.data() || {};
       const article = data.article || {};
-      articles.push({
-        dateKey,
-        title: article.title || null,
-        url: article.url || null,
+      if (article && (article.url || article.title)) {
+        articles.push({
+          dateKey,
+          title: normalizeTextValue(article.title),
+          url: article.url || null,
+        });
+      }
+
+      const questionsSnap = await db.collection(`questions/${dateKey}/questions`).get();
+      questionsSnap.forEach((questionDoc) => {
+        const qData = questionDoc.data() || {};
+        const qArticle = qData.article || {};
+        if (!qArticle) return;
+        articles.push({
+          dateKey,
+          title: normalizeTextValue(qArticle.title),
+          url: qArticle.url || null,
+        });
       });
     } catch (error) {
       logger.warn('Failed to fetch historical question', { dateKey, error: error.message });
@@ -395,43 +585,253 @@ async function runDailyQuestionJob() {
   const openaiClient = getOpenAIClient();
   const model = getModelName();
   const dateKey = getLuxDateKey();
-  const docRef = db.doc(`questions/${dateKey}`);
-  const existing = await docRef.get();
+  const dayDocRef = db.doc(`questions/${dateKey}`);
+  const existing = await dayDocRef.get();
   if (existing.exists) {
-    logger.info("Question already exists for", {dateKey});
-    return "already_exists";
+    const existingData = existing.data() || {};
+    if (existingData.question || existingData.questionCount) {
+      logger.info("Questions already exist for", {dateKey});
+      return "already_exists";
+    }
+    const existingQuestions = await dayDocRef.collection("questions").limit(1).get();
+    if (!existingQuestions.empty) {
+      logger.info("Questions already exist for", {dateKey});
+      return "already_exists";
+    }
   }
 
-  const recentArticles = await fetchRecentArticles(dateKey, 3);
+  const recentArticles = await fetchRecentArticles(dateKey, 5);
   const exclusion = {
-    urls: new Set(recentArticles.map(item => (item.url || '').toLowerCase()).filter(Boolean)),
-    titles: new Set(recentArticles.map(item => (item.title || '').toLowerCase()).filter(Boolean)),
+    urls: new Set(
+      recentArticles
+        .map((item) => (typeof item.url === "string" ? item.url.toLowerCase() : ""))
+        .filter(Boolean),
+    ),
+    titles: new Set(
+      recentArticles
+        .map((item) => normalizeTextValue(item.title).toLowerCase())
+        .filter(Boolean),
+    ),
   };
 
-  const listingHtml = await fetchHtml(RTL_NEWS_URL);
-  const topArticle = extractTopArticle(listingHtml, exclusion);
-  if (!topArticle) {
-    throw new Error("No suitable article found on listing page");
+  const forbiddenArticles = recentArticles.map((item) => ({
+    url: item.url || null,
+    title: normalizeTextValue(item.title) || null,
+  }));
+
+  const questionEntries = [];
+  const questionSignatures = new Set();
+  const listingCache = new Map();
+  let order = 1;
+
+  const attemptGenerateForSource = async (source) => {
+    let payload = null;
+    let listingContent = listingCache.get(source.id) || null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        if (!listingContent) {
+          listingContent = await fetchListingContentForSource(source);
+          listingCache.set(source.id, listingContent);
+        }
+      } catch (error) {
+        logger.error("Failed to fetch listing for source", {
+          sourceId: source.id,
+          error: error.message,
+        });
+        break;
+      }
+
+      try {
+        payload = await generateQuestionPayloadForSource({
+          source,
+          listingContent,
+          context: {
+            dateKey,
+            recentArticles,
+            forbiddenArticles,
+          },
+          openaiClient,
+          model,
+        });
+      } catch (error) {
+        logger.error("Failed to generate payload for source", {
+          sourceId: source.id,
+          error: error.message,
+          attempt,
+        });
+        payload = null;
+      }
+
+      if (!payload) {
+        continue;
+      }
+
+      const articleUrl = normalizeTextValue(payload.article?.url || "").toLowerCase();
+      const articleTitle = normalizeTextValue(payload.article?.title || "").toLowerCase();
+      const questionSignature = getQuestionSignature(payload.question);
+
+      const isDuplicateArticle =
+        (articleUrl && exclusion.urls.has(articleUrl)) ||
+        (articleTitle && exclusion.titles.has(articleTitle));
+      const isDuplicateQuestion = questionSignature && questionSignatures.has(questionSignature);
+
+      if ((isDuplicateArticle || isDuplicateQuestion) && attempt < 2) {
+        forbiddenArticles.push({
+          url: payload.article?.url || null,
+          title: payload.article?.title || null,
+        });
+        logger.warn("Detected duplicate content, retrying with extended exclusions", {
+          sourceId: source.id,
+          articleUrl: payload.article?.url || null,
+          articleTitle: payload.article?.title || null,
+          duplicateArticle: isDuplicateArticle,
+          duplicateQuestion: isDuplicateQuestion,
+          attempt,
+        });
+        payload = null;
+        continue;
+      }
+
+      if (!payload?.question || !Array.isArray(payload.options) || !payload.options.length) {
+        logger.warn("Payload missing question/options", {sourceId: source.id});
+        payload = null;
+        continue;
+      }
+
+      const questionRef = dayDocRef.collection("questions").doc();
+      const listingExcerpt = typeof listingContent === "string"
+        ? listingContent.slice(0, 2000)
+        : null;
+
+      const questionDoc = buildQuestionDocument(payload, {
+        dateKey,
+        model,
+        source,
+        order,
+        listingExcerpt,
+      });
+
+      questionEntries.push({
+        id: questionRef.id,
+        ref: questionRef,
+        data: questionDoc,
+      });
+
+      if (articleUrl) {
+        exclusion.urls.add(articleUrl);
+        forbiddenArticles.push({url: payload.article?.url || null, title: payload.article?.title || null});
+      }
+      if (articleTitle) {
+        exclusion.titles.add(articleTitle);
+      }
+      if (questionSignature) {
+        questionSignatures.add(questionSignature);
+      }
+
+      order += 1;
+      return true;
+    }
+
+    return false;
+  };
+
+  for (const source of NEWS_SOURCES) {
+    if (questionEntries.length >= QUESTION_TARGET_COUNT) {
+      break;
+    }
+    await attemptGenerateForSource(source);
   }
 
-  const articleHtml = await fetchHtml(topArticle.url);
+  if (questionEntries.length < QUESTION_TARGET_COUNT) {
+    const fallbackSources = [...NEWS_SOURCES];
+    let fallbackIndex = 0;
+    let safetyCounter = 0;
+    const safetyLimit = fallbackSources.length * 6;
+    while (questionEntries.length < QUESTION_TARGET_COUNT && safetyCounter < safetyLimit) {
+      const source = fallbackSources[fallbackIndex % fallbackSources.length];
+      fallbackIndex += 1;
+      safetyCounter += 1;
+      await attemptGenerateForSource(source);
+    }
+  }
 
-  const payload = await generateQuestionPayload(listingHtml, articleHtml, {
-    listingUrl: RTL_NEWS_URL,
-    article: topArticle,
+  if (questionEntries.length < QUESTION_TARGET_COUNT) {
+    logger.error("Failed to generate required Mir Sinn questions", {
+      target: QUESTION_TARGET_COUNT,
+      actual: questionEntries.length,
+    });
+    if (!questionEntries.length) {
+      throw new Error("Unable to generate any questions for today");
+    }
+  }
+
+  const generatedAt = admin.firestore.FieldValue.serverTimestamp();
+  const batch = db.batch();
+
+  const primaryQuestion = questionEntries[0];
+  if (!primaryQuestion) {
+    throw new Error("Unable to determine primary question");
+  }
+
+  const perOption = {};
+  (primaryQuestion.data.options || []).forEach((option) => {
+    perOption[option.id] = 0;
+  });
+
+  const dayDocData = {
     dateKey,
-    recentArticles,
-  }, openaiClient, model);
+    questionCount: questionEntries.length,
+    primaryQuestionId: primaryQuestion.id,
+    questionIds: questionEntries.map((entry) => entry.id),
+    questionsSummary: questionEntries.map((entry) => ({
+      id: entry.id,
+      order: entry.data.order,
+      title: normalizeTextValue(entry.data.article?.title),
+      sourceId: entry.data.newsSource?.id || null,
+      sourceLabel: entry.data.newsSource?.label || null,
+      articleUrl: entry.data.article?.url || null,
+    })),
+    question: primaryQuestion.data.question,
+    options: primaryQuestion.data.options,
+    article: primaryQuestion.data.article,
+    tags: primaryQuestion.data.tags || [],
+    analysis: primaryQuestion.data.analysis,
+    notification: primaryQuestion.data.notification,
+    newsSource: primaryQuestion.data.newsSource,
+    results: {
+      totalResponses: 0,
+      perOption,
+      breakdown: [],
+      lastUpdated: generatedAt,
+    },
+    source: {
+      generatedAt,
+      model,
+      promptVersion: primaryQuestion.data.source?.promptVersion || "2025-02-20",
+      listingStrategy: primaryQuestion.data.source?.listingStrategy || null,
+    },
+    createdAt: generatedAt,
+    updatedAt: generatedAt,
+  };
 
-  if (!payload?.question || !payload?.options?.length) {
-    throw new Error("OpenAI payload missing question or options");
-  }
+  batch.set(dayDocRef, dayDocData, {merge: false});
+  questionEntries.forEach((entry) => {
+    batch.set(entry.ref, entry.data, {merge: false});
+  });
 
-  const document = buildQuestionDocument(payload, topArticle, dateKey, model);
-  await docRef.set(document, {merge: false});
+  await batch.commit();
 
-  logger.info("Created question of the day", {dateKey, article: topArticle.url});
-  return "created";
+  logger.info("Created questions of the day", {
+    dateKey,
+    questionCount: questionEntries.length,
+    sources: questionEntries.map((entry) => entry.data.newsSource?.id || "unknown"),
+  });
+
+  return {
+    status: "created",
+    questionCount: questionEntries.length,
+  };
 }
 
 exports.createDeviceAccount = onCall(
@@ -498,6 +898,7 @@ exports.generateQuestionOfTheDay = onSchedule(
     schedule: "0 0 * * *",
     timeZone: LUX_TZ,
     secrets: [OPENAI_API_KEY],
+    timeoutSeconds: 540,
   },
   async () => {
   return runDailyQuestionJob();
@@ -507,11 +908,12 @@ exports.generateQuestionOfTheDay = onSchedule(
 exports.generateQuestionOfTheDayOnDemand = onRequest(
   {
     secrets: [OPENAI_API_KEY],
+    timeoutSeconds: 540,
   },
   async (req, res) => {
     try {
       const result = await runDailyQuestionJob();
-      res.json({status: result});
+      res.json(result);
     } catch (error) {
       console.log({error});
       logger.error("Failed to generate question", error);
@@ -1041,16 +1443,26 @@ async function uploadInstagramVideo(storageKey, buffer) {
   if (!buffer?.length) {
     throw new Error("No video buffer provided for upload");
   }
+  const downloadToken =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : crypto.randomBytes(16).toString("hex");
   const bucket = admin.storage().bucket();
   const file = bucket.file(storageKey);
   await file.save(buffer, {
     contentType: "video/mp4",
     metadata: {
       cacheControl: "public, max-age=3600",
+      metadata: {
+        firebaseStorageDownloadTokens: downloadToken,
+      },
     },
   });
+  const downloadUrl = buildPublicStorageUrl(storageKey, downloadToken, bucket.name);
   return {
     storagePath: storageKey,
+    downloadToken,
+    downloadUrl,
   };
 }
 
@@ -1157,6 +1569,53 @@ async function getSignedUrlForStoragePath(storagePath, expiresInMs = 60 * 60 * 1
   return {signedUrl, expiresAt};
 }
 
+function buildPublicStorageUrl(storagePath, downloadToken, bucketName) {
+  if (!storagePath || !downloadToken) {
+    return null;
+  }
+  const targetBucketName = bucketName || admin.storage().bucket().name;
+  const encodedPath = encodeURIComponent(storagePath);
+  return `https://firebasestorage.googleapis.com/v0/b/${targetBucketName}/o/${encodedPath}?alt=media&token=${downloadToken}`;
+}
+
+function getReelStorageInfo(questionDoc = {}) {
+  const reelInfo = questionDoc.instagramReel || questionDoc.reel || {};
+  const videoPath =
+    reelInfo.videoPath ||
+    reelInfo.videoStoragePath ||
+    reelInfo.generatedVideoPath ||
+    null;
+  const downloadUrl = reelInfo.videoDownloadUrl || reelInfo.downloadUrl || null;
+  const downloadToken = reelInfo.videoDownloadToken || reelInfo.downloadToken || null;
+  return {
+    reelInfo,
+    videoPath,
+    downloadUrl,
+    downloadToken,
+  };
+}
+
+async function resolveVideoUrlFromStorageInfo(storageInfo) {
+  if (!storageInfo?.videoPath) {
+    throw new Error("No reel video path available");
+  }
+  const publicUrl =
+    storageInfo.downloadUrl ||
+    (storageInfo.downloadToken ? buildPublicStorageUrl(storageInfo.videoPath, storageInfo.downloadToken) : null);
+  if (publicUrl) {
+    return {
+      videoUrl: publicUrl,
+      source: "public",
+    };
+  }
+
+  const signedVideo = await getSignedUrlForStoragePath(storageInfo.videoPath);
+  return {
+    videoUrl: signedVideo.signedUrl,
+    source: "signed",
+  };
+}
+
 function buildInstagramCaption(questionDoc) {
   const question = questionDoc?.question || {};
   const questionText = question.lb || question.en || question.de || question.fr || "Share your voice with Mir Sinn.";
@@ -1221,7 +1680,7 @@ async function createInstagramPost(imageUrl, caption) {
     throw new Error("Instagram media creation response missing id");
   }
 
-  await waitForInstagramContainer(creationId, accessToken);
+  await waitForInstagramContainer(creationId, accessToken, 40, 5000);
 
   const publishResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media_publish`, {
     method: "POST",
@@ -1292,6 +1751,83 @@ async function createInstagramReel(videoUrl, caption, options = {}) {
   const publishJson = await publishResponse.json().catch(() => ({}));
   if (!publishResponse.ok) {
     throw new Error(`Instagram reel publish failed: ${publishJson.error?.message || publishResponse.statusText}`);
+  }
+
+  return {
+    creationId,
+    postId: publishJson.id || null,
+    publishResponse: publishJson,
+  };
+}
+
+async function createInstagramStory(videoUrl, options = {}) {
+  const igUserId = INSTAGRAM_USER_ID.value();
+  const accessToken = INSTAGRAM_ACCESS_TOKEN.value();
+  if (!igUserId) {
+    throw new Error("INSTAGRAM_USER_ID is not configured");
+  }
+  if (!accessToken) {
+    throw new Error("INSTAGRAM_ACCESS_TOKEN is not configured");
+  }
+
+  const params = new URLSearchParams({
+    media_type: "STORIES",
+    video_url: videoUrl,
+    access_token: accessToken,
+  });
+
+  if (typeof options.thumbOffset === "number") {
+    params.set("thumb_offset", String(options.thumbOffset));
+  }
+  const linkUrl = options.linkUrl || "https://mirsinn.lu";
+  const interactiveElements =
+    options.interactiveElements ||
+    [
+      {
+        type: "LINK",
+        link: linkUrl,
+        x: 0.5,
+        y: 0.15,
+        width: 0.85,
+        height: 0.12,
+        rotation: 0,
+      },
+    ];
+  if (interactiveElements?.length) {
+    params.set("interactive_elements", JSON.stringify(interactiveElements));
+  }
+
+  const creationResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media`, {
+    method: "POST",
+    body: params,
+  });
+  const creationJson = await creationResponse.json().catch(() => ({}));
+  if (!creationResponse.ok) {
+    throw new Error(`Instagram story creation failed: ${creationJson.error?.message || creationResponse.statusText}`);
+  }
+
+  const creationId = creationJson.id;
+  if (!creationId) {
+    throw new Error("Instagram story creation response missing id");
+  }
+
+  await waitForInstagramContainer(
+    creationId,
+    accessToken,
+    options.maxAttempts ?? 40,
+    options.delayMs ?? 5000,
+  );
+
+  const publishResponse = await fetch(`https://graph.instagram.com/v24.0/${igUserId}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({
+      creation_id: creationId,
+      access_token: accessToken,
+    }),
+  });
+  const publishJson = await publishResponse.json().catch(() => ({}));
+  if (!publishResponse.ok) {
+    throw new Error(`Instagram story publish failed: ${publishJson.error?.message || publishResponse.statusText}`);
   }
 
   return {
@@ -1396,6 +1932,8 @@ async function publishQuestionToInstagramDoc(questionRef, questionDoc, dateKey, 
         videoPath: reelVideoUpload.storagePath,
         videoStoragePath: reelVideoUpload.storagePath,
         generatedVideoPath: reelVideoUpload.storagePath,
+        videoDownloadToken: reelVideoUpload.downloadToken,
+        videoDownloadUrl: reelVideoUpload.downloadUrl,
         coverImagePath: uploadResult.storagePath,
         caption,
         durationSeconds: reelMeta?.durationSeconds ?? 3,
@@ -1433,6 +1971,7 @@ exports.publishQuestionToInstagram = onDocumentCreated(
     document: "questions/{dateKey}",
     secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
     timeoutSeconds: 300,
+    memory: "1GiB",
   },
   async (event) => {
     const snapshot = event.data;
@@ -1451,6 +1990,7 @@ exports.publishQuestionToInstagramOnDemand = onRequest(
   {
     secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
     timeoutSeconds: 300,
+    memory: "1GiB",
   },
   async (req, res) => {
     const method = (req.method || "GET").toUpperCase();
@@ -1526,12 +2066,8 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
     return {status: "skipped", reason: "already_published", postId: existingPostId};
   }
 
-  const reelInfo = questionDoc.instagramReel || questionDoc.reel || {};
-  const videoPath =
-    reelInfo.videoPath ||
-    reelInfo.videoStoragePath ||
-    reelInfo.generatedVideoPath ||
-    null;
+  const storageInfo = getReelStorageInfo(questionDoc);
+  const {reelInfo, videoPath, downloadToken: storedDownloadToken} = storageInfo;
   if (!videoPath) {
     logger.warn("No reel video path available for question", {dateKey});
     await questionRef.set(
@@ -1547,16 +2083,22 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
     return {status: "skipped", reason: "missing_video"};
   }
 
-  let signedVideo;
+  const publicVideoUrl =
+    storageInfo.downloadUrl ||
+    (storageInfo.downloadToken ? buildPublicStorageUrl(videoPath, storageInfo.downloadToken) : null);
+
+  let resolvedVideo;
   try {
-    signedVideo = await getSignedUrlForStoragePath(videoPath);
+    resolvedVideo = await resolveVideoUrlFromStorageInfo(storageInfo);
   } catch (error) {
-    logger.error("Unable to sign reel video URL", {dateKey, videoPath, error: error.message});
+    logger.error("Unable to resolve reel video URL", {dateKey, videoPath, error: error.message});
     await questionRef.set(
       {
         instagramReel: {
           status: "error",
           error: `video_signing_failed: ${error.message}`,
+          videoDownloadToken: storedDownloadToken || null,
+          videoDownloadUrl: publicVideoUrl || null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
       },
@@ -1564,6 +2106,7 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
     );
     throw error;
   }
+  const videoUrl = resolvedVideo.videoUrl;
 
   let coverUrl = null;
   let coverPath =
@@ -1587,8 +2130,13 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
 
   const caption = reelInfo.caption || buildInstagramCaption(questionDoc);
   try {
-    logger.info("Publishing Instagram reel", {dateKey, force});
-    const publishResult = await createInstagramReel(signedVideo.signedUrl, caption, {coverUrl});
+    logger.info("Publishing Instagram reel", {
+      dateKey,
+      force,
+      usingDownloadToken: Boolean(storedDownloadToken),
+      videoUrlSource: resolvedVideo.source,
+    });
+    const publishResult = await createInstagramReel(videoUrl, caption, {coverUrl});
     const reelUpdate = {
       status: "published",
       postId: publishResult.postId,
@@ -1607,6 +2155,12 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
     if (reelInfo.readyAt) reelUpdate.readyAt = reelInfo.readyAt;
     if (reelInfo.videoStoragePath) reelUpdate.videoStoragePath = reelInfo.videoStoragePath;
     if (reelInfo.generatedVideoPath) reelUpdate.generatedVideoPath = reelInfo.generatedVideoPath;
+    if (storageInfo.downloadToken) reelUpdate.videoDownloadToken = storageInfo.downloadToken;
+    if (publicVideoUrl) {
+      reelUpdate.videoDownloadUrl = publicVideoUrl;
+    } else if (reelInfo.videoDownloadUrl) {
+      reelUpdate.videoDownloadUrl = reelInfo.videoDownloadUrl;
+    }
 
     await questionRef.set(
       {
@@ -1624,6 +2178,111 @@ async function publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateK
           status: "error",
           error: error.message,
           videoPath,
+          videoDownloadToken: storedDownloadToken || null,
+          videoDownloadUrl: publicVideoUrl || null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    throw error;
+  }
+}
+
+async function publishQuestionStoryDoc(questionRef, questionDoc, dateKey, options = {}) {
+  const force = Boolean(options.force);
+  const existingStory = questionDoc.instagramStory || {};
+  if (!force && existingStory.status === "published" && existingStory.postId) {
+    logger.info("Instagram story already published for question", {dateKey, postId: existingStory.postId});
+    return {status: "skipped", reason: "already_published", postId: existingStory.postId};
+  }
+
+  const storageInfo = getReelStorageInfo(questionDoc);
+  const {videoPath} = storageInfo;
+  if (!videoPath) {
+    logger.warn("No reel video available for Instagram story", {dateKey});
+    await questionRef.set(
+      {
+        instagramStory: {
+          status: "skipped",
+          reason: "missing_video",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    return {status: "skipped", reason: "missing_video"};
+  }
+
+  let resolvedVideo;
+  try {
+    resolvedVideo = await resolveVideoUrlFromStorageInfo(storageInfo);
+  } catch (error) {
+    logger.error("Unable to resolve story video URL", {dateKey, videoPath, error: error.message});
+    await questionRef.set(
+      {
+        instagramStory: {
+          status: "error",
+          error: `video_signing_failed: ${error.message}`,
+          videoPath,
+          videoDownloadToken: storageInfo.downloadToken || null,
+          videoDownloadUrl:
+            storageInfo.downloadUrl ||
+            (storageInfo.downloadToken ? buildPublicStorageUrl(videoPath, storageInfo.downloadToken) : null),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      },
+      {merge: true},
+    );
+    throw error;
+  }
+
+  const storyCaption = storageInfo.reelInfo?.caption || buildInstagramCaption(questionDoc);
+  const storyDownloadUrl =
+    storageInfo.downloadUrl ||
+    (storageInfo.downloadToken ? buildPublicStorageUrl(videoPath, storageInfo.downloadToken) : null);
+
+  try {
+    logger.info("Publishing Instagram story from reel video", {
+      dateKey,
+      force,
+      videoUrlSource: resolvedVideo.source,
+    });
+    const storyOptions = options.storyOptions || {};
+    if (!storyOptions.linkUrl) {
+      storyOptions.linkUrl = "https://mirsinn.lu";
+    }
+    const publishResult = await createInstagramStory(resolvedVideo.videoUrl, storyOptions);
+    const storyUpdate = {
+      status: "published",
+      postId: publishResult.postId,
+      creationId: publishResult.creationId,
+      videoPath,
+      videoDownloadToken: storageInfo.downloadToken || null,
+      videoDownloadUrl: storyDownloadUrl || null,
+      caption: storyCaption,
+      source: "reel_video",
+      publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    await questionRef.set(
+      {
+        instagramStory: storyUpdate,
+      },
+      {merge: true},
+    );
+
+    return {status: "published", postId: publishResult.postId, creationId: publishResult.creationId};
+  } catch (error) {
+    logger.error("Failed to publish Instagram story", {dateKey, error: error.message, force});
+    await questionRef.set(
+      {
+        instagramStory: {
+          status: "error",
+          error: error.message,
+          videoPath,
+          videoDownloadToken: storageInfo.downloadToken || null,
+          videoDownloadUrl: storyDownloadUrl || null,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
       },
@@ -1644,15 +2303,47 @@ async function runInstagramReelPublish(dateKey, options = {}) {
   return publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateKey, options);
 }
 
-exports.publishQuestionReelDaily = onSchedule(
+exports.publishQuestionReelAndStoryAuto = onDocumentWritten(
   {
-    schedule: "0 7 * * *",
-    timeZone: LUX_TZ,
-    secrets: [INSTAGRAM_ACCESS_TOKEN],
+    document: "questions/{dateKey}",
+    secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
+    timeoutSeconds: 540,
+    memory: "1GiB",
   },
-  async () => {
-    const dateKey = getLuxDateKey();
-    return runInstagramReelPublish(dateKey, {force: false});
+  async (event) => {
+    const afterSnapshot = event.data?.after;
+    if (!afterSnapshot) {
+      return null;
+    }
+    const dateKey = event.params?.dateKey || afterSnapshot.id || "unknown";
+    const afterData = afterSnapshot.data();
+    const beforeData = event.data?.before?.data();
+
+    const postJustPublished =
+      afterData?.instagram?.status === "published" &&
+      afterData.instagram?.postId &&
+      (!beforeData?.instagram || beforeData.instagram.status !== "published");
+
+    if (!postJustPublished) {
+      return null;
+    }
+
+    const questionRef = afterSnapshot.ref;
+    logger.info("Auto reel/story publish triggered by post", {dateKey});
+
+    let workingDoc = afterData;
+    const reelResult = await publishQuestionReelToInstagramDoc(questionRef, workingDoc, dateKey, {force: false});
+
+    if (reelResult?.status !== "published") {
+      logger.info("Reel publish outcome during auto flow", {dateKey, reelStatus: reelResult?.status, reelReason: reelResult?.reason});
+    }
+
+    const refreshedSnapshot = await questionRef.get();
+    workingDoc = refreshedSnapshot.data();
+
+    await publishQuestionStoryDoc(questionRef, workingDoc, dateKey, {force: false});
+
+    return null;
   },
 );
 
@@ -1660,6 +2351,7 @@ exports.publishQuestionReelOnDemand = onRequest(
   {
     secrets: [INSTAGRAM_ACCESS_TOKEN],
     timeoutSeconds: 300,
+    memory: "1GiB",
   },
   async (req, res) => {
     const method = (req.method || "GET").toUpperCase();
@@ -1709,6 +2401,76 @@ exports.publishQuestionReelOnDemand = onRequest(
   },
 );
 
+exports.publishQuestionReelAndStoryOnDemand = onRequest(
+  {
+    secrets: [OPENAI_API_KEY, INSTAGRAM_ACCESS_TOKEN],
+    timeoutSeconds: 540,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "POST") {
+      res.set("Allow", "GET, POST");
+      res.status(405).json({error: "Method not allowed"});
+      return;
+    }
+
+    let body = {};
+    if (method === "POST") {
+      if (typeof req.body === "string") {
+        try {
+          body = JSON.parse(req.body);
+        } catch {
+          body = {};
+        }
+      } else if (req.body && typeof req.body === "object") {
+        body = req.body;
+      }
+    }
+
+    const dateParam =
+      (typeof (body.date ?? "") === "string" && body.date.trim()) ||
+      (typeof req.query?.date === "string" && req.query.date.trim()) ||
+      "";
+    const dateKey = dateParam || getLuxDateKey();
+
+    const forceParam = body.force ?? req.query?.force ?? false;
+    const force =
+      typeof forceParam === "string"
+        ? ["1", "true", "yes", "force"].includes(forceParam.toLowerCase())
+        : Boolean(forceParam);
+
+    logger.info("On-demand Instagram reel and story publish requested", {dateKey, force});
+
+    try {
+      const questionRef = db.doc(`questions/${dateKey}`);
+      const snapshot = await questionRef.get();
+      if (!snapshot.exists) {
+        res.status(404).json({error: `Question ${dateKey} not found`, dateKey});
+        return;
+      }
+
+      let questionDoc = snapshot.data();
+      const reelResult = await publishQuestionReelToInstagramDoc(questionRef, questionDoc, dateKey, {force});
+
+      const refreshedSnapshot = await questionRef.get();
+      questionDoc = refreshedSnapshot.data();
+
+      const storyResult = await publishQuestionStoryDoc(questionRef, questionDoc, dateKey, {force});
+
+      res.json({
+        dateKey,
+        force,
+        reel: reelResult,
+        story: storyResult,
+      });
+    } catch (error) {
+      logger.error("Failed to publish Instagram reel/story on demand", {dateKey, error: error.message});
+      res.status(500).json({error: error.message, dateKey});
+    }
+  },
+);
+
 exports.sendQuestionNotifications = onSchedule(
   {
     schedule: "0 8 * * *",
@@ -1740,7 +2502,17 @@ async function refreshHistoricalStats() {
   }
   const questionDoc = questionSnap.data() || {};
 
-  const answersSnap = await db.collection(`questions/${dateKey}/answers`).get();
+  let answersSnap = await db.collection(`questions/${dateKey}/answers`).get();
+  if (answersSnap.empty) {
+    const primaryQuestionId = questionDoc.primaryQuestionId || questionDoc?.primaryQuestion?.id || questionDoc?.primaryQuestionId;
+    const fallbackQuestionId = questionDoc.primaryQuestionId;
+    const resolvedQuestionId = primaryQuestionId || fallbackQuestionId;
+    if (resolvedQuestionId) {
+      answersSnap = await db
+        .collection(`questions/${dateKey}/questions/${resolvedQuestionId}/answers`)
+        .get();
+    }
+  }
   if (answersSnap.empty) {
     logger.info('No answers found for question', {dateKey});
     const summary = createNoVoteSummary(questionDoc);

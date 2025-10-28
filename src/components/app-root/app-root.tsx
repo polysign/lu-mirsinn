@@ -5,7 +5,6 @@ import type { LanguageCode } from '../../types/language';
 import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
 import archiveIcon from '../../assets/icons/regular/archive.svg';
-import userIcon from '../../assets/icons/regular/user.svg';
 import { updateDeviceLanguage } from '../../services/firebase';
 import { logAnalyticsEvent } from '../../services/analytics';
 import { SERVICE_WORKER_UPDATE_EVENT, type ServiceWorkerUpdatePayload } from '../../global/app';
@@ -218,14 +217,11 @@ export class AppRoot {
   };
 
   render() {
-    const navLabels: Record<
-      LanguageCode,
-      { question: string; profile: string; history: string }
-    > = {
-      lb: { question: 'Fro', profile: 'Profil', history: 'Archiv' },
-      fr: { question: 'Question', profile: 'Profil', history: 'Historique' },
-      de: { question: 'Frage', profile: 'Profil', history: 'Verlauf' },
-      en: { question: 'Question', profile: 'Profile', history: 'History' },
+    const navLabels: Record<LanguageCode, { questions: string; history: string }> = {
+      lb: { questions: 'Froen', history: 'Archiv' },
+      fr: { questions: 'Questions', history: 'Historique' },
+      de: { questions: 'Fragen', history: 'Verlauf' },
+      en: { questions: 'Questions', history: 'History' },
     };
     const labels = navLabels[this.language] || navLabels.lb;
     return (
@@ -270,9 +266,6 @@ export class AppRoot {
             <Route path="/">
               <app-home language={this.language} />
             </Route>
-            <Route path="/profile">
-              <app-profile language={this.language} />
-            </Route>
             <Route path="/history">
               <app-history language={this.language} />
             </Route>
@@ -286,25 +279,12 @@ export class AppRoot {
               active: this.currentPath === '/',
             }}
             onClick={() => this.navigate('/')}
-            aria-label="Question of the day"
+            aria-label="Questions of the day"
           >
             <span class="nav-icon">
               <img src={sealQuestionIcon} alt="" />
             </span>
-            <span>{labels.question}</span>
-          </button>
-          <button
-            class={{
-              'nav-button': true,
-              active: this.currentPath.startsWith('/profile'),
-            }}
-            onClick={() => this.navigate('/profile')}
-            aria-label="Profile"
-          >
-            <span class="nav-icon">
-              <img src={userIcon} alt="" />
-            </span>
-            <span>{labels.profile}</span>
+            <span>{labels.questions}</span>
           </button>
           <button
             class={{

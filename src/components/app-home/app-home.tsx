@@ -1,39 +1,27 @@
 import { Component, Prop, State, Watch, h } from '@stencil/core';
-import { Router } from '../../';
 import {
   getAnswerForDevice,
-  getTodayQuestionDoc,
+  getTodayQuestions,
   setAnswer,
-  subscribeToDevice,
   type QuestionDocument,
-  type DeviceDocument,
 } from '../../services/firebase';
-import { fallbackQuestion } from '../../services/mock-data';
+import { fallbackQuestions } from '../../services/mock-data';
 import type { LanguageCode } from '../../types/language';
-import infoIcon from '../../assets/icons/regular/info.svg';
-import megaphoneIcon from '../../assets/icons/regular/megaphone.svg';
 import { registerMessagingForDevice } from '../../services/messaging';
 import { logAnalyticsEvent } from '../../services/analytics';
+
 type ErrorKey = 'missing-question' | 'load-failed' | 'submit-failed';
 
-type QuestionCacheEntry = {
-  dateKey: string | null;
-  question: QuestionDocument | null;
-  alreadyAnswered: boolean;
+interface QuestionAnswerState {
   selectedOption: string | null;
-};
-
-const questionCache: QuestionCacheEntry = {
-  dateKey: null,
-  question: null,
-  alreadyAnswered: false,
-  selectedOption: null,
-};
+  alreadyAnswered: boolean;
+  submitting: boolean;
+  error?: ErrorKey;
+}
 
 interface ViewState {
   loading: boolean;
-  question?: QuestionDocument;
-  alreadyAnswered: boolean;
+  questions: QuestionDocument[];
   errorKey?: ErrorKey;
 }
 
@@ -61,56 +49,50 @@ const getTodayLabel = (language: LanguageCode) => {
   return formatter.format(new Date());
 };
 
-const LOCAL_POINTS_KEY = 'mir-sinn-points';
-const CONFETTI_PIECES = Array.from({ length: 24 }, (_, index) => index);
+const ANSWER_KEY_PREFIX = 'mir-sinn-answered-';
+const TAG_VARIANT_COUNT = 6;
+
+type CachedAnswer = {
+  selectedOption: string | null;
+  alreadyAnswered: boolean;
+};
+
+type QuestionCacheEntry = {
+  dateKey: string | null;
+  questions: QuestionDocument[];
+  answers: Record<string, CachedAnswer>;
+};
+
+const questionCache: QuestionCacheEntry = {
+  dateKey: null,
+  questions: [],
+  answers: {},
+};
 
 const copy: Record<
   LanguageCode,
   {
-    context: string;
+    questionsHeading: string;
+    questionLabel: string;
     answerLabel: string;
     selectPlaceholder: string;
     submit: string;
     saving: string;
-    shareButton: string;
-    shareSuccess: string;
-    shareError: string;
-    resultsInfo: string;
-    historyLink: string;
     retry: string;
     noQuestion: string;
     loadError: string;
     submitError: string;
-    alreadyAnswered: string;
-    shareTextSuffix: string;
-    pointsTitle: string;
-    pointsSubtitle: string;
-    aboutTitle: string;
-    aboutDescription: string;
-    aboutBuiltBy: string;
-    aboutDeviceCodeLabel: string;
-    aboutHelpLabel: string;
-    dialogTitle: string;
-    dialogConfirm: string;
-    dialogCloseLabel: string;
-    termsHeading: string;
-    termsBody: string;
-    privacyHeading: string;
-    privacyEmphasis: string;
-    privacyBody: string;
+    questionAnswered: string;
+    allAnswered: string;
   }
 > = {
   lb: {
-    context: "Däin Feedback hëlleft eis ze verstoen, wéi Lëtzebuerg denkt.",
+    questionsHeading: 'Froen vum Dag',
+    questionLabel: 'Fro',
     answerLabel: 'Är Äntwert',
     selectPlaceholder: '-- Wielt eng Optioun --',
     submit: 'Ofschécken',
     saving: 'Gëtt gespäichert…',
-    shareButton: "Deel d'App",
-    shareSuccess: 'Dee Link ass gedeelt. Merci!',
-    shareError: 'Konnt net automatesch gedeelt ginn. Kopéiert de Link manuell.',
-    resultsInfo: 'Déi detailléiert Resultater fannt Dir muer am Archiv.',
-    historyLink: 'Kuckt fréier Froen',
     retry: 'Nees probéieren',
     noQuestion:
       "D'Fro vum Dag ass nach net verfügbar. Probéiert et spéider nach eng Kéier.",
@@ -118,42 +100,17 @@ const copy: Record<
       'Et ass e Feeler opgetrueden. Kontrolléiert w.e.g. är Verbindung a probéiert nach eng Kéier.',
     submitError:
       'Mir konnten är Äntwert net späicheren. Probéiert et nach eng Kéier.',
-    alreadyAnswered:
-      "Dir hutt dës Fro schonn haut beäntwert. Kuckt muer zeréck fir d'Resultater!",
-    shareTextSuffix: "Beäntwert d'Fro am Mir Sinn App.",
-    pointsTitle: 'Deng Punkten',
-    pointsSubtitle: '+100 pro Äntwert',
-    aboutTitle: 'Mir Sinn',
-    aboutDescription:
-      "Mir Sinn ass eng Initiativ fir d'Meenung vu Lëtzebuerg ze sammelen. Dréit all Dag bäi a entdeckt, wat d'Gemeinschaft denkt.",
-    aboutBuiltBy: 'Entwéckelt vun',
-    aboutDeviceCodeLabel: 'Device Code:',
-    aboutHelpLabel: 'Konditiounen & Dateschutz',
-    dialogTitle: 'Konditiounen & Dateschutz',
-    dialogConfirm: 'Verstanen',
-    dialogCloseLabel: 'Dialog zoumaachen',
-    termsHeading: 'Nutzungsbedéngungen',
-    termsBody:
-      "Mir Sinn bitt eng deeglech Fro. D'Participatioun ass fräi a fräiwëlleg; mat der Notzung stëmmt Dir zou, datt Är anonym Äntwerten an aggregéierter Form gewise ginn.",
-    privacyHeading: 'Dateschutz',
-    privacyEmphasis: 'Mir späicheren keng perséinlech Benotzerdate.',
-    privacyBody:
-      "Mir halen nëmmen eng generéiert Device-ID, eng Referral-Info, Är Optioun an Är Punkten, fir d'Participatioun ze verwalten an anonym Statistiken ze generéieren.",
+    questionAnswered: "D'Fro gouf beäntwert.",
+    allAnswered:
+      'Merci. All Froen vum Dag goufen haut beäntwert. Kuckt muer zeréck fir d Resultater an déi nächst Froen.',
   },
   fr: {
-    context:
-      'Ton avis nous aide à comprendre ce que pense le Luxembourg.',
+    questionsHeading: 'Questions du jour',
+    questionLabel: 'Question',
     answerLabel: 'Votre réponse',
     selectPlaceholder: '-- Choisissez une option --',
     submit: 'Envoyer',
     saving: 'Envoi…',
-    shareButton: "Partager l'app",
-    shareSuccess: 'Lien copié ou partagé. Merci !',
-    shareError:
-      'Impossible de partager automatiquement. Copiez le lien manuellement.',
-    resultsInfo:
-      'Les résultats détaillés seront visibles demain dans la rubrique Historique.',
-    historyLink: 'Voir les questions précédentes',
     retry: 'Réessayer',
     noQuestion:
       "La question du jour n'est pas encore disponible. Réessayez plus tard.",
@@ -161,42 +118,17 @@ const copy: Record<
       "Une erreur s'est produite. Vérifiez votre connexion et réessayez.",
     submitError:
       "Nous n'avons pas pu enregistrer votre réponse. Réessayez.",
-    alreadyAnswered:
-      "Vous avez déjà répondu à la question d'aujourd'hui. Revenez demain pour voir les résultats !",
-    shareTextSuffix:
-      "Réponds à la question dans l'application Mir Sinn.",
-    pointsTitle: 'Vos points',
-    pointsSubtitle: '+100 par réponse',
-    aboutTitle: 'Mir Sinn',
-    aboutDescription:
-      "Mir Sinn est une initiative pour recueillir le ressenti du Luxembourg. Participe chaque jour et découvre ce que pense la communauté.",
-    aboutBuiltBy: 'Conçu par',
-    aboutDeviceCodeLabel: 'Device Code:',
-    aboutHelpLabel: 'Conditions & vie privée',
-    dialogTitle: 'Conditions & vie privée',
-    dialogConfirm: 'Compris',
-    dialogCloseLabel: 'Fermer la fenêtre',
-    termsHeading: "Conditions d'utilisation",
-    termsBody:
-      "Mir Sinn propose une question quotidienne. L’usage est gratuit et volontaire ; en participant, vous acceptez que vos réponses anonymes soient utilisées pour des résultats agrégés.",
-    privacyHeading: 'Vie privée',
-    privacyEmphasis: 'Nous ne stockons aucune donnée personnelle.',
-    privacyBody:
-      "Seule une ID générée pour l’appareil, un code de partage, votre réponse et vos points sont conservés afin de limiter les doublons et produire des statistiques anonymes.",
+    questionAnswered: 'La question a été répondue.',
+    allAnswered:
+      'Merci. Toutes les questions du jour ont été répondues. Revenez demain pour les résultats et les prochaines questions.',
   },
   de: {
-    context: 'Deine Stimme zeigt, was Luxemburg denkt.',
+    questionsHeading: 'Fragen des Tages',
+    questionLabel: 'Frage',
     answerLabel: 'Deine Antwort',
     selectPlaceholder: '-- Option wählen --',
     submit: 'Absenden',
     saving: 'Wird gesendet…',
-    shareButton: 'App teilen',
-    shareSuccess: 'Geteilt! Merci.',
-    shareError:
-      'Konnte nicht automatisch geteilt werden. Kopiere den Link manuell.',
-    resultsInfo:
-      'Die detaillierten Resultate seht ihr morgen im Archiv.',
-    historyLink: 'Frühere Fragen ansehen',
     retry: 'Erneut versuchen',
     noQuestion:
       'Die Tagesfrage ist noch nicht verfügbar. Bitte versuche es später erneut.',
@@ -204,42 +136,17 @@ const copy: Record<
       'Es ist ein Fehler aufgetreten. Bitte Verbindung prüfen und erneut versuchen.',
     submitError:
       'Deine Antwort konnte nicht gespeichert werden. Bitte erneut versuchen.',
-    alreadyAnswered:
-      'Sie haben die heutige Frage bereits beantwortet. Schauen Sie morgen wieder vorbei, um die Ergebnisse zu sehen!',
-    shareTextSuffix:
-      'Beantworte die Frage in der Mir Sinn App.',
-    pointsTitle: 'Deine Punkte',
-    pointsSubtitle: '+100 pro Antwort',
-    aboutTitle: 'Mir Sinn',
-    aboutDescription:
-      'Mir Sinn sammelt täglich die Stimmung Luxemburgs. Mach mit und erfahre, wie die Gemeinschaft denkt.',
-    aboutBuiltBy: 'Entwickelt von',
-    aboutDeviceCodeLabel: 'Device Code:',
-    aboutHelpLabel: 'Infos & Datenschutz',
-    dialogTitle: 'Infos & Datenschutz',
-    dialogConfirm: 'Verstanden',
-    dialogCloseLabel: 'Dialog schließen',
-    termsHeading: 'Nutzungsbedingungen',
-    termsBody:
-      'Mir Sinn stellt täglich eine Frage bereit. Die Nutzung ist freiwillig; mit der Teilnahme stimmst du zu, dass deine anonymen Antworten für aggregierte Resultate genutzt werden.',
-    privacyHeading: 'Datenschutz',
-    privacyEmphasis: 'Wir speichern keine persönlichen Nutzerdaten.',
-    privacyBody:
-      'Lediglich eine erzeugte Geräte-ID, ein Empfehlungs-Code, deine Antwort und deine Punkte werden aufbewahrt, um Mehrfachteilnahmen zu vermeiden und anonyme Statistiken zu erstellen.',
+    questionAnswered: 'Die Frage wurde beantwortet.',
+    allAnswered:
+      'Vielen Dank. Alle Fragen des Tages wurden beantwortet. Schau morgen wieder vorbei für die Ergebnisse und neue Fragen.',
   },
   en: {
-    context: 'Your voice helps us understand how Luxembourg thinks.',
+    questionsHeading: 'Questions of the day',
+    questionLabel: 'Question',
     answerLabel: 'Your answer',
     selectPlaceholder: '-- Choose an option --',
     submit: 'Submit',
     saving: 'Saving…',
-    shareButton: 'Share the app',
-    shareSuccess: 'Shared! Thank you.',
-    shareError:
-      'Could not share automatically. Please copy the link manually.',
-    resultsInfo:
-      'Detailed results are available tomorrow in the History section.',
-    historyLink: 'View previous questions',
     retry: 'Try again',
     noQuestion:
       'The question of the day is not available yet. Please try again later.',
@@ -247,32 +154,11 @@ const copy: Record<
       'Something went wrong. Check your connection and try again.',
     submitError:
       'We could not save your answer. Please try again.',
-    alreadyAnswered:
-      "You already answered today's question. Come back tomorrow to see the results!",
-    shareTextSuffix:
-      'Answer the question in the Mir Sinn app.',
-    pointsTitle: 'Your points',
-    pointsSubtitle: '+100 per answer',
-    aboutTitle: 'Mir Sinn',
-    aboutDescription:
-      'Mir Sinn captures Luxembourg’s daily pulse. Take part every day and see what the community thinks.',
-    aboutBuiltBy: 'Built by',
-    aboutDeviceCodeLabel: 'Device Code:',
-    aboutHelpLabel: 'Terms & privacy',
-    dialogTitle: 'Terms & Privacy',
-    dialogConfirm: 'Got it',
-    dialogCloseLabel: 'Close dialog',
-    termsHeading: 'Terms of Service',
-    termsBody:
-      'Mir Sinn provides one daily question. Participation is free and optional; by answering you agree that your anonymous answers may be used to present aggregated results.',
-    privacyHeading: 'Privacy',
-    privacyEmphasis: 'We do not store any personal user data.',
-    privacyBody:
-      'We only keep a generated device ID, a referral code, your answer choice, and your points to prevent duplicate participation and to build anonymous statistics.',
+    questionAnswered: 'Question has been answered.',
+    allAnswered:
+      'Thank you. All questions of the day have been answered. Check back tomorrow for the results and the next questions.',
   },
 };
-
-const ANSWER_KEY_PREFIX = 'mir-sinn-answered-';
 
 @Component({
   tag: 'app-home',
@@ -282,214 +168,227 @@ const ANSWER_KEY_PREFIX = 'mir-sinn-answered-';
 export class AppHome {
   @Prop() language: LanguageCode = 'lb';
 
-  @State() state: ViewState = { loading: true, alreadyAnswered: false };
-  @State() selectedOption: string | null = null;
-  @State() submitting = false;
-  @State() shareStatus: 'idle' | 'success' | 'error' = 'idle';
-  @State() points: number | null = null;
-  @State() confettiBurst = false;
-  @State() showPolicies = false;
-  @State() overlayVisible = true;
-  @State() deviceShortCode: string | null = null;
+  @State() state: ViewState = { loading: true, questions: [] };
+  @State() answers: Record<string, QuestionAnswerState> = {};
+  @State() todayLabel: string = getTodayLabel('lb');
 
   private todayKey = getTodayKey();
   private hasFirebase = false;
-  private deviceUnsubscribe?: () => void;
-  private deviceSubscriptionRetry?: number;
-  private confettiTimeout?: number;
-  private previousPoints: number | null = null;
-  private deviceSnapshot: DeviceDocument | null = null;
 
   componentWillLoad() {
-    this.hasFirebase = Boolean((window as any).__MIR_SINN_HAS_FIREBASE__);
-    this.deviceShortCode = this.readWindowShortCode();
-    this.loadQuestion().finally(() => {
-      this.setupDeviceSubscription();
-    });
+    this.hasFirebase = Boolean(
+      (window as any).__MIR_SINN_HAS_FIREBASE__,
+    );
+    this.todayLabel = getTodayLabel(this.language);
+    this.loadQuestions();
   }
 
   disconnectedCallback() {
-    this.deviceUnsubscribe?.();
-    if (this.deviceSubscriptionRetry) {
-      window.clearTimeout(this.deviceSubscriptionRetry);
-    }
-    if (this.confettiTimeout) {
-      window.clearTimeout(this.confettiTimeout);
-    }
-    this.deviceSnapshot = null;
-    this.showPolicies = false;
+    this.state = { loading: true, questions: [] };
+    this.answers = {};
   }
 
   @Watch('language')
   languageChanged() {
-    this.shareStatus = 'idle';
+    this.todayLabel = getTodayLabel(this.language);
+    this.answers = { ...this.answers };
+  }
+
+  private get translations() {
+    return copy[this.language] || copy.lb;
   }
 
   private get deviceId(): string | null {
     return (window as any).__DEVICE_ID__ || null;
   }
 
-  private get translations() {
-    return copy[this.language];
+  private restoreCachedAnswers(questions: QuestionDocument[]) {
+    const restored: Record<string, QuestionAnswerState> = {};
+    questions.forEach(question => {
+      const cached = questionCache.answers[question.id];
+      restored[question.id] = {
+        selectedOption: cached?.selectedOption ?? null,
+        alreadyAnswered: cached?.alreadyAnswered ?? false,
+        submitting: false,
+      };
+    });
+    return restored;
   }
 
-  private normalizeShortCode(code?: string | null): string | null {
-    if (typeof code !== 'string') return null;
-    const trimmed = code.trim();
-    return trimmed.length ? trimmed : null;
-  }
-
-  private readWindowShortCode(): string | null {
-    if (typeof window === 'undefined') {
-      return null;
+  private async fetchQuestions(): Promise<QuestionDocument[]> {
+    if (!this.hasFirebase) {
+      return fallbackQuestions.slice(0, 5);
     }
-    return this.normalizeShortCode((window as any).__DEVICE_SHORT_CODE__);
+    const list = await getTodayQuestions(this.todayKey);
+    return list.slice(0, 5);
   }
 
-  private getDisplayShortCode(): string | null {
-    return (
-      this.normalizeShortCode(this.deviceShortCode) ||
-      this.normalizeShortCode(this.deviceSnapshot?.shortCode) ||
-      this.readWindowShortCode()
+  private async resolveExistingAnswers(
+    questions: QuestionDocument[],
+  ): Promise<Record<string, QuestionAnswerState>> {
+    const result: Record<string, QuestionAnswerState> = {};
+    await Promise.all(
+      questions.map(async question => {
+        let alreadyAnswered = false;
+        let selectedOption: string | null = null;
+
+        if (this.hasFirebase && this.deviceId) {
+          try {
+            const stored = await getAnswerForDevice(
+              this.todayKey,
+              this.deviceId,
+              question.id,
+            );
+            if (stored) {
+              alreadyAnswered = true;
+              selectedOption = stored.optionId;
+            }
+          } catch {
+            alreadyAnswered = false;
+          }
+        } else {
+          const local = this.readLocalAnswer(question.id);
+          if (local) {
+            alreadyAnswered = true;
+            selectedOption = local;
+          }
+        }
+
+        result[question.id] = {
+          selectedOption,
+          alreadyAnswered,
+          submitting: false,
+        };
+      }),
     );
+    return result;
   }
 
-  private async loadQuestion() {
-    if (questionCache.dateKey === this.todayKey && questionCache.question) {
+  private async loadQuestions() {
+    if (
+      questionCache.dateKey === this.todayKey &&
+      questionCache.questions.length
+    ) {
       this.state = {
         loading: false,
-        question: questionCache.question,
-        alreadyAnswered: questionCache.alreadyAnswered,
+        questions: questionCache.questions,
       };
-      this.selectedOption = questionCache.selectedOption;
-      this.overlayVisible = false;
+      this.answers = this.restoreCachedAnswers(questionCache.questions);
       return;
     }
 
-    this.state = { loading: true, alreadyAnswered: false };
-    this.overlayVisible = true;
-    try {
-      const question = this.hasFirebase
-        ? await getTodayQuestionDoc(this.todayKey)
-        : fallbackQuestion;
+    this.state = { loading: true, questions: [] };
+    this.answers = {};
 
-      if (!question) {
+    try {
+      const questions = await this.fetchQuestions();
+
+      if (!questions.length) {
         this.state = {
           loading: false,
-          alreadyAnswered: false,
+          questions: [],
           errorKey: 'missing-question',
         };
-        this.scheduleOverlayRemoval();
+        questionCache.dateKey = this.todayKey;
+        questionCache.questions = [];
+        questionCache.answers = {};
+        logAnalyticsEvent('question_loaded', {
+          dateKey: this.todayKey,
+          hasQuestion: false,
+          questionCount: 0,
+        });
         return;
       }
 
-      let alreadyAnswered = false;
-      let selectedOption: string | null = null;
-
-      if (this.hasFirebase && this.deviceId) {
-        const storedAnswer = await getAnswerForDevice(
-          this.todayKey,
-          this.deviceId,
-        );
-        if (storedAnswer) {
-          alreadyAnswered = true;
-          selectedOption = storedAnswer.optionId;
-        }
-      } else {
-        try {
-          const stored = localStorage.getItem(
-            `${ANSWER_KEY_PREFIX}${this.todayKey}`,
-          );
-          if (stored) {
-            alreadyAnswered = true;
-            selectedOption = stored;
-          }
-        } catch {
-          alreadyAnswered = false;
-        }
-      }
-
-      this.selectedOption = selectedOption;
-
+      const answers = await this.resolveExistingAnswers(questions);
       this.state = {
         loading: false,
-        question,
-        alreadyAnswered,
+        questions,
+        errorKey: undefined,
       };
+      this.answers = answers;
+
       questionCache.dateKey = this.todayKey;
-      questionCache.question = question;
-      questionCache.alreadyAnswered = alreadyAnswered;
-      questionCache.selectedOption = selectedOption;
+      questionCache.questions = questions;
+      questionCache.answers = questions.reduce<Record<string, CachedAnswer>>(
+        (acc, question) => {
+          const answer = answers[question.id];
+          acc[question.id] = {
+            selectedOption: answer?.selectedOption ?? null,
+            alreadyAnswered: answer?.alreadyAnswered ?? false,
+          };
+          return acc;
+        },
+        {},
+      );
+
       logAnalyticsEvent('question_loaded', {
         dateKey: this.todayKey,
-        hasQuestion: Boolean(question),
-        alreadyAnswered,
+        hasQuestion: true,
+        questionCount: questions.length,
       });
-      if (!this.hasFirebase) {
-        this.loadLocalPoints(false);
-      }
-      this.scheduleOverlayRemoval();
     } catch (error) {
       console.error(error);
       this.state = {
         loading: false,
-        alreadyAnswered: false,
+        questions: [],
         errorKey: 'load-failed',
       };
       questionCache.dateKey = null;
-      questionCache.question = null;
-      questionCache.alreadyAnswered = false;
-      questionCache.selectedOption = null;
-      this.scheduleOverlayRemoval();
+      questionCache.questions = [];
+      questionCache.answers = {};
+      logAnalyticsEvent('question_load_failed', {
+        dateKey: this.todayKey,
+      });
     }
   }
 
-  private handleSelectChange = (event: Event) => {
+  private buildAnswerKey(questionId: string) {
+    return `${ANSWER_KEY_PREFIX}${this.todayKey}-${questionId}`;
+  }
+
+  private readLocalAnswer(questionId: string): string | null {
+    try {
+      return localStorage.getItem(this.buildAnswerKey(questionId));
+    } catch {
+      return null;
+    }
+  }
+
+  private writeLocalAnswer(questionId: string, optionId: string) {
+    try {
+      localStorage.setItem(this.buildAnswerKey(questionId), optionId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private handleOptionChange(questionId: string, event: Event) {
     const select = event.target as HTMLSelectElement;
-    this.selectedOption = select.value;
-  };
+    const selectedOption = select.value || null;
+    const existing = this.answers[questionId] || {
+      selectedOption: null,
+      alreadyAnswered: false,
+      submitting: false,
+    };
 
-  private setupDeviceSubscription() {
-    if (!this.hasFirebase) {
-      this.loadLocalPoints(false);
-      if (this.deviceId) {
-        registerMessagingForDevice(this.deviceId, false);
-      }
-      return;
-    }
+    this.answers = {
+      ...this.answers,
+      [questionId]: {
+        ...existing,
+        selectedOption,
+        error: undefined,
+      },
+    };
 
-    const id = this.deviceId;
-    if (!id) {
-      if (!this.deviceSubscriptionRetry) {
-        this.deviceSubscriptionRetry = window.setTimeout(() => {
-          this.deviceSubscriptionRetry = undefined;
-          this.setupDeviceSubscription();
-        }, 400);
-      }
-      return;
-    }
-
-    this.deviceUnsubscribe?.();
-    this.deviceUnsubscribe = subscribeToDevice(id, (doc: DeviceDocument | null) => {
-      this.deviceSnapshot = doc;
-      const normalizedShortCode = this.normalizeShortCode(doc?.shortCode);
-      if (normalizedShortCode) {
-        if (typeof window !== 'undefined') {
-          (window as any).__DEVICE_SHORT_CODE__ = normalizedShortCode;
-        }
-        if (normalizedShortCode !== this.deviceShortCode) {
-          this.deviceShortCode = normalizedShortCode;
-        }
-      } else if (this.deviceShortCode) {
-        this.deviceShortCode = null;
-      }
-      const points = doc?.points ?? 0;
-      const shouldAnimate = this.previousPoints !== null;
-      this.handlePointsUpdate(points, shouldAnimate);
-      if (doc && (!doc.fcmToken || doc.fcmToken.length === 0)) {
-        registerMessagingForDevice(id, true);
-      }
-    });
+    const cached = questionCache.answers[questionId] || {
+      selectedOption: null,
+      alreadyAnswered: false,
+    };
+    questionCache.answers[questionId] = {
+      ...cached,
+      selectedOption,
+    };
   }
 
   private getLocalizedQuestion(question: QuestionDocument | undefined) {
@@ -498,7 +397,8 @@ export class AppHome {
   }
 
   private getLocalizedSummary(question: QuestionDocument | undefined) {
-    const summary = question?.article?.summary;
+    const summary =
+      question?.article?.summary || question?.results?.summary;
     if (!summary) return '';
     return summary[this.language] || summary.lb || summary.en || '';
   }
@@ -511,233 +411,88 @@ export class AppHome {
     }));
   }
 
-  private getLocalPoints(): number {
-    try {
-      const stored = localStorage.getItem(LOCAL_POINTS_KEY);
-      if (!stored) return 0;
-      const parsed = parseInt(stored, 10);
-      return Number.isFinite(parsed) ? parsed : 0;
-    } catch {
-      return 0;
-    }
+  private getLocalizedTags(question: QuestionDocument | undefined) {
+    if (!question?.tags) return [];
+    return question.tags
+      .map(tag => {
+        if (!tag) return null;
+        const label =
+          tag[this.language] ||
+          tag.lb ||
+          tag.en ||
+          tag.fr ||
+          tag.de ||
+          '';
+        return label?.trim() ? label.trim() : null;
+      })
+      .filter((label): label is string => Boolean(label));
   }
 
-  private saveLocalPoints(value: number) {
-    try {
-      localStorage.setItem(LOCAL_POINTS_KEY, String(value));
-    } catch {
-      // ignore persistence issues
-    }
-  }
-
-  private loadLocalPoints(animate: boolean) {
-    const points = this.getLocalPoints();
-    this.handlePointsUpdate(points, animate);
-  }
-
-  private handlePointsUpdate(next: number, animate = true) {
-    const previous = this.previousPoints;
-    this.points = next;
-    if (animate && previous !== null && next > previous) {
-      this.launchConfetti();
-    }
-    this.previousPoints = next;
-  }
-
-  private launchConfetti() {
-    if (this.confettiTimeout) {
-      window.clearTimeout(this.confettiTimeout);
-    }
-    this.confettiBurst = false;
-    requestAnimationFrame(() => {
-      this.confettiBurst = true;
-      this.confettiTimeout = window.setTimeout(() => {
-        this.confettiBurst = false;
-      }, 2200);
-    });
-  }
-
-  private renderConfetti() {
-    if (!this.confettiBurst) {
-      return null;
-    }
-    return (
-      <div class="confetti-layer">
-        {CONFETTI_PIECES.map(piece => {
-          const position = (piece / CONFETTI_PIECES.length) * 100;
-          const delay = (piece % 7) * 0.08;
-          const duration = 1.6 + (piece % 5) * 0.12;
-          const drift = (piece % 2 === 0 ? 1 : -1) * (8 + (piece % 6) * 4);
-          const style = {
-            left: `${position}%`,
-            animationDelay: `${delay}s`,
-            animationDuration: `${duration}s`,
-            '--drift': `${drift}px`,
-          } as any;
-          return <span class="confetti-piece" style={style} />;
-        })}
-      </div>
-    );
-  }
-
-  private formatPoints() {
-    if (this.points === null) {
-      return '—';
-    }
-    const locale = this.language === 'lb' ? 'de-LU' : this.language;
-    return this.points.toLocaleString(locale);
-  }
-
-  private scheduleOverlayRemoval() {
-    if (!this.overlayVisible) return;
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        this.overlayVisible = false;
-      }, 450);
-    });
-  }
-
-  private async handleSubmit(event: Event) {
+  private async handleSubmit(
+    event: Event,
+    question: QuestionDocument,
+  ) {
     event.preventDefault();
-    if (
-      !this.state.question ||
-      !this.selectedOption ||
-      this.state.alreadyAnswered
-    ) {
+    const current = this.answers[question.id];
+    if (!current || !current.selectedOption || current.alreadyAnswered) {
       return;
     }
 
-    this.submitting = true;
+    this.answers = {
+      ...this.answers,
+      [question.id]: {
+        ...current,
+        submitting: true,
+        error: undefined,
+      },
+    };
 
     try {
       if (this.hasFirebase && this.deviceId) {
-        await setAnswer(this.todayKey, this.deviceId, {
+        await setAnswer(this.todayKey, question.id, this.deviceId, {
           deviceId: this.deviceId,
-          optionId: this.selectedOption,
+          optionId: current.selectedOption,
           language: this.language,
           answeredAt: new Date().toISOString(),
+          questionId: question.id,
         });
+        registerMessagingForDevice(this.deviceId, true);
       } else {
-        try {
-          localStorage.setItem(
-            `${ANSWER_KEY_PREFIX}${this.todayKey}`,
-            this.selectedOption,
-          );
-        } catch {
-          // ignore local demo storage issues
-        }
-        const current = this.points ?? this.getLocalPoints();
-        const next = current + 100;
-        this.saveLocalPoints(next);
-        this.handlePointsUpdate(next);
+        this.writeLocalAnswer(question.id, current.selectedOption);
       }
 
-      this.state = {
-        ...this.state,
-        alreadyAnswered: true,
-        errorKey: undefined,
+      this.answers = {
+        ...this.answers,
+        [question.id]: {
+          ...current,
+          submitting: false,
+          alreadyAnswered: true,
+          error: undefined,
+        },
       };
-      questionCache.dateKey = this.todayKey;
-      questionCache.question = this.state.question || questionCache.question;
-      questionCache.alreadyAnswered = true;
-      questionCache.selectedOption = this.selectedOption;
-      this.shareStatus = 'idle';
-      if (this.deviceId) {
-        registerMessagingForDevice(this.deviceId, true);
-      }
+
+      questionCache.answers[question.id] = {
+        selectedOption: current.selectedOption,
+        alreadyAnswered: true,
+      };
+
       logAnalyticsEvent('answer_recorded', {
         dateKey: this.todayKey,
-        option: this.selectedOption,
+        questionId: question.id,
+        option: current.selectedOption,
         language: this.language,
         viaFirebase: this.hasFirebase,
       });
     } catch (error) {
       console.error(error);
-      this.state = {
-        ...this.state,
-        errorKey: 'submit-failed',
+      this.answers = {
+        ...this.answers,
+        [question.id]: {
+          ...current,
+          submitting: false,
+          error: 'submit-failed',
+        },
       };
-    } finally {
-      this.submitting = false;
-    }
-  }
-
-  private async handleShare() {
-    if (!this.state.question) return;
-    const translations = this.translations;
-    const shareUrl = this.buildShareUrl();
-    const shareData = {
-      title: 'Mir Sinn - Fro vum Dag',
-      text: `${this.getLocalizedQuestion(
-        this.state.question,
-      )}\n\n${translations.shareTextSuffix}`,
-      url: shareUrl,
-    };
-
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-        this.shareStatus = 'success';
-        logAnalyticsEvent('share_success', {
-          dateKey: this.todayKey,
-          method: 'web-share',
-        });
-      } catch (err) {
-        console.warn('Share cancelled or failed', err);
-        this.shareStatus = 'error';
-        logAnalyticsEvent('share_failed', {
-          dateKey: this.todayKey,
-          method: 'web-share',
-          message: err?.message || 'cancelled',
-        });
-      }
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(
-        `${shareData.text} ${shareData.url}`,
-      );
-      this.shareStatus = 'success';
-      logAnalyticsEvent('share_success', {
-        dateKey: this.todayKey,
-        method: 'clipboard',
-      });
-    } catch (err) {
-      console.warn('Fallback share failed', err);
-      this.shareStatus = 'error';
-      logAnalyticsEvent('share_failed', {
-        dateKey: this.todayKey,
-        method: 'clipboard',
-        message: err?.message || 'unknown',
-      });
-    }
-  }
-
-  private buildShareUrl() {
-    const baseUrl = `${window.location.origin}${window.location.pathname}`;
-    const params = new URLSearchParams(window.location.search);
-    params.delete('from');
-
-    const shortCode = this.latestShortCode();
-    if (shortCode) {
-      params.set('from', shortCode);
-    }
-
-    const query = params.toString();
-    return query ? `${baseUrl}?${query}` : baseUrl;
-  }
-
-  private latestShortCode(): string | null {
-    const current = this.getDisplayShortCode();
-    if (current) {
-      return current;
-    }
-    try {
-      const params = new URLSearchParams(window.location.search);
-      return this.normalizeShortCode(params.get('from'));
-    } catch {
-      return null;
     }
   }
 
@@ -756,215 +511,177 @@ export class AppHome {
     const message =
       errorKey === 'missing-question'
         ? translations.noQuestion
-        : errorKey === 'load-failed'
-        ? translations.loadError
-        : translations.submitError;
+        : translations.loadError;
 
     return (
-      <div class="card error-card">
+      <div class="error-state">
         <p>{message}</p>
-        <button class="primary" type="button" onClick={() => this.loadQuestion()}>
-          {translations.retry}
-        </button>
+        {errorKey !== 'missing-question' && (
+          <button
+            class="primary"
+            type="button"
+            onClick={() => this.loadQuestions()}
+          >
+            {translations.retry}
+          </button>
+        )}
       </div>
     );
   }
 
-  private renderAnswerForm(question: QuestionDocument) {
+  private renderAnsweredSummary(question: QuestionDocument) {
     const translations = this.translations;
-    const options = this.getLocalizedOptions(question);
-
+    const summary = this.getLocalizedSummary(question);
     return (
-      <form class="answer-form" onSubmit={event => this.handleSubmit(event)}>
-        <label htmlFor="answer-select">{translations.answerLabel}</label>
-        <select
-          id="answer-select"
-          required
-          onInput={this.handleSelectChange}
-        >
-          <option value="" disabled selected={!this.selectedOption}>
-            {translations.selectPlaceholder}
-          </option>
-          {options.map(option => (
-            <option
-              value={option.id}
-              selected={this.selectedOption === option.id}
-            >
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <button
-          class="primary"
-          type="submit"
-          disabled={this.submitting || !this.selectedOption}
-        >
-          {this.submitting ? translations.saving : translations.submit}
-        </button>
-      </form>
+      <div class="answered-block">
+        <p class="answered-message">{translations.questionAnswered}</p>
+        {summary && <p class="answered-summary">{summary}</p>}
+      </div>
     );
   }
 
-  private renderAlreadyAnswered() {
+  private renderQuestionPanel(
+    question: QuestionDocument,
+    index: number,
+  ) {
+    const translations = this.translations;
+    const answerState =
+      this.answers[question.id] || {
+        selectedOption: null,
+        alreadyAnswered: false,
+        submitting: false,
+      };
+    const options = this.getLocalizedOptions(question);
+    const selectValue = answerState.selectedOption ?? '';
+    const tags = this.getLocalizedTags(question);
+
     return (
-      <div class="already-answered">
-        <p>{this.translations.alreadyAnswered}</p>
-      </div>
+      <section class="question-panel">
+        <header class="question-panel__header">
+          <span class="question-panel__number">
+            {translations.questionLabel} {index + 1}
+          </span>
+          <h2>{this.getLocalizedQuestion(question)}</h2>
+          {tags.length ? (
+            <ul class="tag-list">
+              {tags.map((tag, tagIndex) => {
+                const variant =
+                  (tagIndex % TAG_VARIANT_COUNT) + 1;
+                return (
+                  <li class={`tag-chip tag-chip--${variant}`}>
+                    <span>{tag}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </header>
+        {!answerState.alreadyAnswered ? (
+          <form
+            class="question-form"
+            onSubmit={event => this.handleSubmit(event, question)}
+          >
+            <label class="question-form__label">
+              <span>{translations.answerLabel}</span>
+              <select
+                onInput={event => this.handleOptionChange(question.id, event)}
+                aria-label={translations.answerLabel}
+              >
+                <option value="" selected={!selectValue}>
+                  {translations.selectPlaceholder}
+                </option>
+                {options.map(option => (
+                  <option
+                    value={option.id}
+                    selected={selectValue === option.id}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {answerState.error === 'submit-failed' && (
+              <p class="form-error">{translations.submitError}</p>
+            )}
+            <button
+              class="primary"
+              type="submit"
+              disabled={
+                !answerState.selectedOption || answerState.submitting
+              }
+            >
+              {answerState.submitting
+                ? translations.saving
+                : translations.submit}
+            </button>
+          </form>
+        ) : (
+          this.renderAnsweredSummary(question)
+        )}
+      </section>
+    );
+  }
+
+  private renderPlaceholderPanel(index: number) {
+    const translations = this.translations;
+    return (
+      <section class="question-panel question-panel--empty">
+        <header class="question-panel__header">
+          <span class="question-panel__number">
+            {translations.questionLabel} {index + 1}
+          </span>
+          <h2>{translations.noQuestion}</h2>
+        </header>
+      </section>
     );
   }
 
   render() {
-    const showOverlay = this.state.loading || this.overlayVisible;
-
-    if (this.state.errorKey) {
-      return this.renderError(this.state.errorKey);
+    if (this.state.loading) {
+      return this.renderLoader();
     }
 
-    const question = this.state.question;
+    if (this.state.errorKey === 'load-failed') {
+      return this.renderError('load-failed');
+    }
+
     const translations = this.translations;
-    const questionText = this.getLocalizedQuestion(question);
-    const summaryText = this.getLocalizedSummary(question);
-    const deviceCode = this.getDisplayShortCode();
+    const questions = this.state.questions;
+    const totalPanels = 5;
+    const answeredCount = questions.filter(question => {
+      const state = this.answers[question.id];
+      return state?.alreadyAnswered;
+    }).length;
+    const allAnswered = questions.length > 0 && answeredCount >= questions.length;
 
-    return (
-      <div class="question-wrapper">
-        <div
-          class={{
-            'loading-screen': true,
-            'loading-screen--active': showOverlay,
-            'loading-screen--fade-out': this.overlayVisible && !this.state.loading,
-          }}
-          aria-busy={this.state.loading}
-        >
-          {this.renderLoader()}
-        </div>
-        <div class={{ 'question-view': true, 'question-view--visible': !this.overlayVisible }}>
-        {this.renderConfetti()}
-        <section class="card question-card">
-          <header>
-            <span class="meta">{getTodayLabel(this.language)}</span>
-            {summaryText && <p class="article-summary">{summaryText}</p>}
-            <h2>{questionText}</h2>
-          </header>
-          <p class="context">
-            <span>{translations.context}</span>
-          </p>
-          {this.state.alreadyAnswered
-            ? this.renderAlreadyAnswered()
-            : this.renderAnswerForm(question)}
-        </section>
-
-        <section class="card action-card">
-          <button class="secondary" type="button" onClick={() => this.handleShare()}>
-            <span>{translations.shareButton}</span>
-            <span class="action-icon" aria-hidden="true">
-              <img src={megaphoneIcon} alt="" />
-            </span>
-          </button>
-          <p class="share-note">
-            {this.language === 'fr'
-              ? 'Chaque nouveau visiteur via ton lien te rapporte +5 points.'
-              : this.language === 'de'
-              ? 'Jeder neue Besuch über deinen Link bringt dir +5 Punkte.'
-              : this.language === 'en'
-              ? 'Each friend visiting through your link gives you +5 points.'
-              : 'All Visitte vun dengem Link bréngen der +5 Punkten.'}
-          </p>
-          {this.shareStatus === 'success' && (
-            <p class="share-feedback">{translations.shareSuccess}</p>
-          )}
-          {this.shareStatus === 'error' && (
-            <p class="share-feedback error">{translations.shareError}</p>
-          )}
-        </section>
-
-        <section class="card info-card">
-          <p>{translations.resultsInfo}</p>
-          <button class="link-button" type="button" onClick={() => Router.push('/history')}>
-            {translations.historyLink}
-          </button>
-        </section>
-
-        <section class="card points-card">
-          <header>
-            <span class="points-title">{translations.pointsTitle}</span>
-            <span class="points-subtitle">{translations.pointsSubtitle}</span>
-          </header>
-          <p class="points-value">{this.formatPoints()}</p>
-        </section>
-
-        <section class="card about-card">
-          <header>
-            <span class="about-title">{translations.aboutTitle}</span>
-            <span class="about-version">v0.0.11</span>
-          </header>
-          <p class="about-text">{translations.aboutDescription}</p>
-          <p class="about-code">
-            <span class="about-code-label">{translations.aboutDeviceCodeLabel}</span>
-            <span class="about-code-value">{deviceCode ?? '—'}</span>
-          </p>
-          <footer class="about-footer">
-            <span class="about-built">{translations.aboutBuiltBy}</span>
-            <a href="https://autonoma.lu" target="_blank" rel="noopener">
-              Autonoma.lu
-            </a>
-            <button
-              class="about-help"
-              type="button"
-              onClick={() => (this.showPolicies = true)}
-              aria-label={translations.aboutHelpLabel}
-            >
-              <img src={infoIcon} alt="" />
-            </button>
-          </footer>
-        </section>
-        </div>
-        {this.renderPoliciesDialog()}
-      </div>
-    );
-  }
-
-  private renderPoliciesDialog() {
-    if (!this.showPolicies) return null;
-    const translations = this.translations;
-    return (
-      <div
-        class="dialog-backdrop"
-        role="presentation"
-        onClick={event => {
-          if (event.target === event.currentTarget) this.showPolicies = false;
-        }}
-      >
-        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="policies-title">
-          <header class="dialog-header">
-            <h3 id="policies-title">{translations.dialogTitle}</h3>
-            <button
-              class="dialog-close"
-              type="button"
-              onClick={() => (this.showPolicies = false)}
-              aria-label={translations.dialogCloseLabel}
-            >
-              ×
-            </button>
-          </header>
-          <div class="dialog-body">
-            <section>
-              <h4>{translations.termsHeading}</h4>
-              <p>{translations.termsBody}</p>
-            </section>
-            <section>
-              <h4>{translations.privacyHeading}</h4>
-              <p>
-                <strong>{translations.privacyEmphasis}</strong> {translations.privacyBody}
-              </p>
-            </section>
+    if (allAnswered) {
+      return (
+        <div class="home home--completed">
+          <div class="completion-message">
+            <h1>{translations.questionsHeading}</h1>
+            <p>{translations.allAnswered}</p>
           </div>
-          <footer class="dialog-footer">
-            <button class="primary" type="button" onClick={() => (this.showPolicies = false)}>
-              {translations.dialogConfirm}
-            </button>
-          </footer>
         </div>
+      );
+    }
+
+    const panels = Array.from({ length: totalPanels }, (_, index) => {
+      const question = questions[index];
+      return question
+        ? this.renderQuestionPanel(question, index)
+        : this.renderPlaceholderPanel(index);
+    });
+
+    return (
+      <div class="home">
+        <header class="page-header">
+          <h1>{translations.questionsHeading}</h1>
+          <span class="page-date">{this.todayLabel}</span>
+        </header>
+        {this.state.errorKey === 'missing-question'
+          ? this.renderError('missing-question')
+          : null}
+        <div class="question-grid">{panels}</div>
       </div>
     );
   }

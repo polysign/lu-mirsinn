@@ -8,18 +8,9 @@ import {
   collection,
   getDocs,
   onSnapshot,
+  query,
+  orderBy,
 } from 'firebase/firestore';
-import {
-  getAuth,
-  type Auth,
-  signInWithEmailAndPassword,
-  signOut,
-} from 'firebase/auth';
-import {
-  getFunctions,
-  httpsCallable,
-  type Functions,
-} from 'firebase/functions';
 
 export interface LocalizedText {
   lb: string;
@@ -36,6 +27,7 @@ export interface QuestionOption {
 export interface QuestionDocument {
   id: string;
   dateKey: string;
+  order?: number | null;
   question: LocalizedText;
   options: QuestionOption[];
   article?: {
@@ -45,6 +37,20 @@ export interface QuestionDocument {
     comments?: number;
   };
   analysis?: LocalizedText | null;
+  tags?: LocalizedText[] | null;
+  notification?: {
+    title?: string | null;
+    body?: string | null;
+  } | null;
+  newsSource?: {
+    id?: string | null;
+    label?: string | null;
+    listingUrl?: string | null;
+  } | null;
+  listingExcerpt?: string | null;
+  source?: Record<string, unknown> | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
   results?: {
     totalResponses?: number;
     perOption?: Record<string, number>;
@@ -62,56 +68,8 @@ export interface AnswerDocument {
   optionId: string;
   language: keyof LocalizedText;
   answeredAt: string;
+  questionId?: string | null;
 }
-
-export type DeviceGender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
-
-export type DeviceLivingArea =
-  | 'esch-sur-alzette'
-  | 'clervaux'
-  | 'wiltz'
-  | 'vianden'
-  | 'dikierch'
-  | 'redange'
-  | 'mersch'
-  | 'echternach'
-  | 'grevenmacher'
-  | 'capellen'
-  | 'luxembourg'
-  | 'remich'
-  | 'outside-luxembourg'
-  | 'prefer_not_to_say';
-
-export interface DeviceProfile {
-  gender?: DeviceGender | null;
-  age?: number | null;
-  livingIn?: DeviceLivingArea | null;
-  updatedAt?: string | null;
-}
-
-const DEVICE_GENDERS: ReadonlyArray<DeviceGender> = [
-  'male',
-  'female',
-  'other',
-  'prefer_not_to_say',
-];
-
-const DEVICE_LIVING_AREAS: ReadonlyArray<DeviceLivingArea> = [
-  'esch-sur-alzette',
-  'clervaux',
-  'wiltz',
-  'vianden',
-  'dikierch',
-  'redange',
-  'mersch',
-  'echternach',
-  'grevenmacher',
-  'capellen',
-  'luxembourg',
-  'remich',
-  'outside-luxembourg',
-  'prefer_not_to_say',
-];
 
 export interface DeviceDocument {
   deviceId: string;
@@ -123,16 +81,10 @@ export interface DeviceDocument {
   language?: string | null;
   createdAt?: string | null;
   lastAnsweredAt?: string | null;
-  profile?: DeviceProfile | null;
-  authUid?: string | null;
-  authEmail?: string | null;
-  authLinkedAt?: string | null;
 }
 
 let appInstance: FirebaseApp | null = null;
 let dbInstance: Firestore | null = null;
-let authInstance: Auth | null = null;
-let functionsInstance: Functions | null = null;
 
 type FirebaseEnvConfig = {
   apiKey?: string;
@@ -205,69 +157,6 @@ function ensureFirestore(): Firestore | null {
   return dbInstance;
 }
 
-function ensureAuth(): Auth | null {
-  if (authInstance) {
-    return authInstance;
-  }
-  const app = ensureApp();
-  if (!app) return null;
-  authInstance = getAuth(app);
-  return authInstance;
-}
-
-function ensureFunctions(): Functions | null {
-  if (functionsInstance) {
-    return functionsInstance;
-  }
-  const app = ensureApp();
-  if (!app) return null;
-  functionsInstance = getFunctions(app);
-  return functionsInstance;
-}
-
-export async function requestDeviceAccount(
-  email: string,
-  language?: string,
-): Promise<{ uid?: string; email: string }> {
-  const functions = ensureFunctions();
-  if (!functions) {
-    throw new Error('Firebase functions are not configured.');
-  }
-  const callable = httpsCallable<
-    { email: string; language?: string },
-    { uid?: string; email: string }
-  >(functions, 'createDeviceAccount');
-  const result = await callable({ email, language });
-  return result.data;
-}
-
-export async function verifyDeviceAccount(
-  deviceId: string,
-  email: string,
-  password: string,
-): Promise<{ uid: string; email: string | null }> {
-  const auth = ensureAuth();
-  if (!auth) {
-    throw new Error('Firebase auth is not configured.');
-  }
-  const credential = await signInWithEmailAndPassword(auth, email, password);
-  const user = credential.user;
-  if (!user) {
-    throw new Error('Authentication failed.');
-  }
-  const resolvedEmail = user.email || email || null;
-  await linkDeviceToAuth(deviceId, user.uid, resolvedEmail);
-  try {
-    await signOut(auth);
-  } catch {
-    /* ignore sign out errors */
-  }
-  return {
-    uid: user.uid,
-    email: resolvedEmail,
-  };
-}
-
 export async function getTodayQuestionDoc(
   dateKey: string,
 ): Promise<QuestionDocument | null> {
@@ -292,16 +181,75 @@ export async function getTodayQuestionDoc(
   }
 }
 
+export async function getTodayQuestions(
+  dateKey: string,
+): Promise<QuestionDocument[]> {
+  const db = ensureFirestore();
+  if (!db) {
+    return [];
+  }
+  try {
+    const questionsRef = collection(db, 'questions', dateKey, 'questions');
+    const questionsQuery = query(questionsRef, orderBy('order', 'asc'));
+    const snapshot = await getDocs(questionsQuery);
+    if (!snapshot.empty) {
+      const entries = snapshot.docs.map(docSnap => {
+        const data = docSnap.data() as Omit<QuestionDocument, 'id' | 'dateKey'>;
+        const orderValue =
+          typeof (data as any).order === 'number'
+            ? (data as any).order
+            : null;
+        return {
+          ...(data as QuestionDocument),
+          id: docSnap.id,
+          dateKey,
+          order: orderValue,
+        };
+      });
+      return entries.sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+        const orderB = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+        return a.id.localeCompare(b.id);
+      });
+    }
+  } catch (error) {
+    console.warn('[firebase] Failed to load questions list', error);
+  }
+
+  return [];
+}
+
 export async function setAnswer(
   dateKey: string,
+  questionId: string | null,
   deviceId: string,
   answer: AnswerDocument,
 ): Promise<void> {
   const db = ensureFirestore();
   if (!db) return;
   const ensured = await ensureDeviceDocument(deviceId);
-  const answerRef = doc(db, 'questions', dateKey, 'answers', deviceId);
-  await setDoc(answerRef, answer, { merge: true });
+  const answerRef = questionId
+    ? doc(
+        db,
+        'questions',
+        dateKey,
+        'questions',
+        questionId,
+        'answers',
+        deviceId,
+      )
+    : doc(db, 'questions', dateKey, 'answers', deviceId);
+  await setDoc(
+    answerRef,
+    {
+      ...answer,
+      questionId: questionId ?? (answer as any).questionId ?? null,
+    },
+    { merge: true },
+  );
 
   try {
     const deviceRef = doc(db, 'devices', deviceId);
@@ -330,18 +278,43 @@ export async function setAnswer(
 export async function getAnswerForDevice(
   dateKey: string,
   deviceId: string,
+  questionId?: string | null,
 ): Promise<AnswerDocument | null> {
   const db = ensureFirestore();
   if (!db) return null;
   try {
-    const answerRef = doc(db, 'questions', dateKey, 'answers', deviceId);
+    const answerRef = questionId
+      ? doc(
+          db,
+          'questions',
+          dateKey,
+          'questions',
+          questionId,
+          'answers',
+          deviceId,
+        )
+      : doc(db, 'questions', dateKey, 'answers', deviceId);
     const snapshot = await getDoc(answerRef);
-    if (!snapshot.exists()) return null;
-    const data = snapshot.data();
-    return {
-      ...(data as AnswerDocument),
-      deviceId,
-    };
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      return {
+        ...(data as AnswerDocument),
+        deviceId,
+        questionId: questionId ?? (data as any)?.questionId ?? null,
+      };
+    }
+    if (questionId) {
+      const legacyRef = doc(db, 'questions', dateKey, 'answers', deviceId);
+      const legacySnapshot = await getDoc(legacyRef);
+      if (!legacySnapshot.exists()) return null;
+      const data = legacySnapshot.data();
+      return {
+        ...(data as AnswerDocument),
+        deviceId,
+        questionId: (data as any)?.questionId ?? questionId,
+      };
+    }
+    return null;
   } catch (error) {
     console.warn('[firebase] No existing answer or access denied', error);
     return null;
@@ -434,10 +407,6 @@ export async function ensureDeviceDocument(
         language: null,
         createdAt: new Date().toISOString(),
         lastAnsweredAt: null,
-        profile: null,
-        authUid: null,
-        authEmail: null,
-        authLinkedAt: null,
       };
       await Promise.all([
         setDoc(deviceRef, docData),
@@ -474,18 +443,6 @@ export async function ensureDeviceDocument(
     }
     if (!('fcmToken' in data)) {
       update.fcmToken = null;
-    }
-    if (!('profile' in data)) {
-      update.profile = null;
-    }
-    if (!('authUid' in data)) {
-      update.authUid = null;
-    }
-    if (!('authEmail' in data)) {
-      update.authEmail = null;
-    }
-    if (!('authLinkedAt' in data)) {
-      update.authLinkedAt = null;
     }
     let awardedReferrer = false;
     if (referrerCode && !data.referrer && referrerCode !== data.shortCode) {
@@ -577,69 +534,6 @@ export async function updateDeviceLanguage(deviceId: string, language: string) {
     );
   } catch (error) {
     console.warn('[firebase] Unable to store device language', error);
-  }
-}
-
-export async function updateDeviceProfile(
-  deviceId: string,
-  profile: DeviceProfile,
-) {
-  const db = ensureFirestore();
-  if (!db || !deviceId) return;
-  try {
-    await ensureDeviceDocument(deviceId);
-    const deviceRef = doc(db, 'devices', deviceId);
-    const sanitized: DeviceProfile = {
-      ...profile,
-      age:
-        typeof profile.age === 'number'
-          ? Math.min(100, Math.max(14, Math.round(profile.age)))
-          : null,
-      gender: DEVICE_GENDERS.includes(profile.gender as DeviceGender)
-        ? profile.gender
-        : null,
-      livingIn: DEVICE_LIVING_AREAS.includes(
-        profile.livingIn as DeviceLivingArea,
-      )
-        ? profile.livingIn
-        : null,
-      updatedAt: new Date().toISOString(),
-    };
-    await setDoc(
-      deviceRef,
-      {
-        deviceId,
-        profile: sanitized,
-      },
-      { merge: true },
-    );
-  } catch (error) {
-    console.warn('[firebase] Unable to update device profile', error);
-  }
-}
-
-export async function linkDeviceToAuth(
-  deviceId: string,
-  uid: string,
-  email: string | null,
-) {
-  const db = ensureFirestore();
-  if (!db || !deviceId || !uid) return;
-  try {
-    await ensureDeviceDocument(deviceId);
-    const deviceRef = doc(db, 'devices', deviceId);
-    await setDoc(
-      deviceRef,
-      {
-        deviceId,
-        authUid: uid,
-        authEmail: email || null,
-        authLinkedAt: new Date().toISOString(),
-      },
-      { merge: true },
-    );
-  } catch (error) {
-    console.warn('[firebase] Unable to link device with auth user', error);
   }
 }
 

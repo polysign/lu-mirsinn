@@ -48,6 +48,30 @@ service cloud.firestore {
 
         allow delete: if false;
       }
+
+      match /questions/{entryId} {
+        allow get, list: if true;
+        allow create, update, delete: if false;
+
+        match /answers/{deviceId} {
+          allow get: if resource == null || resource.data.deviceId == deviceId;
+          allow list: if false;
+
+          allow create: if request.resource.data.deviceId == deviceId
+            && request.resource.data.deviceId is string
+            && request.resource.data.optionId is string
+            && request.resource.data.language is string
+            && request.resource.data.answeredAt is string;
+
+          allow update: if resource.data.deviceId == deviceId
+            && request.resource.data.deviceId == deviceId
+            && request.resource.data.optionId is string
+            && request.resource.data.language is string
+            && request.resource.data.answeredAt is string;
+
+          allow delete: if false;
+        }
+      }
     }
   }
 }
