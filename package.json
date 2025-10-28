@@ -11,7 +11,7 @@
     "generate": "stencil generate",
     "postinstall": "npm-run-all install:*",
     "install:icons": "cp -r ./node_modules/@phosphor-icons/core/assets ./src/assets/icons",
-    "postversion": "node scripts/sync-version.js && git add src/components/app-home/app-home.tsx"
+    "postversion": "node scripts/sync-version.js && git add src/components/app-home/app-home.tsx src/global/version.ts"
   },
   "dependencies": {
     "@phosphor-icons/core": "^2.1.1",

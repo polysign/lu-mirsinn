@@ -1,13 +1,15 @@
-import { Component, State, h } from '@stencil/core';
+import { Component, Listen, State, h } from '@stencil/core';
 import { Router } from '../../';
 import { Route } from 'stencil-router-v2';
 import type { LanguageCode } from '../../types/language';
 import globeIcon from '../../assets/icons/regular/globe-simple.svg';
 import sealQuestionIcon from '../../assets/icons/regular/seal-question.svg';
 import archiveIcon from '../../assets/icons/regular/archive.svg';
+import infoIcon from '../../assets/icons/regular/info.svg';
 import { updateDeviceLanguage } from '../../services/firebase';
 import { logAnalyticsEvent } from '../../services/analytics';
 import { SERVICE_WORKER_UPDATE_EVENT, type ServiceWorkerUpdatePayload } from '../../global/app';
+import { APP_VERSION } from '../../global/version';
 
 const languages: Array<{ code: LanguageCode; label: string }> = [
   { code: 'lb', label: 'Lëtzebuergesch' },
@@ -25,6 +27,65 @@ const installCopy: Record<LanguageCode, string> = {
   en: 'Add Mir Sinn to your homescreen for the quickest access.',
 };
 
+const infoCopy: Record<
+  LanguageCode,
+  {
+    buttonLabel: string;
+    closeLabel: string;
+    dialogTitle: string;
+    deviceCode: string;
+    unavailable: string;
+    appVersion: string;
+    noPersonalInfo: string;
+    copyright: string;
+  }
+> = {
+  lb: {
+    buttonLabel: 'Informatiounen',
+    closeLabel: 'Dialog zoumaachen',
+    dialogTitle: 'Iwwer Mir Sinn',
+    deviceCode: 'Kuerzcode',
+    unavailable: 'Net verfügbar',
+    appVersion: 'App-Versioun',
+    noPersonalInfo:
+      'MirSinn.lu späichert keng perséinlech Informatioune weder op dengem Apparat nach an hiren Datebanken.',
+    copyright: 'Copyright (c) {year} MirSinn.lu',
+  },
+  fr: {
+    buttonLabel: 'Informations',
+    closeLabel: 'Fermer la boîte de dialogue',
+    dialogTitle: 'À propos de Mir Sinn',
+    deviceCode: "Code de l'appareil",
+    unavailable: 'Non disponible',
+    appVersion: "Version de l'application",
+    noPersonalInfo:
+      "MirSinn.lu n'enregistre aucune information personnelle sur ton appareil ni dans ses bases de données en ligne.",
+    copyright: 'Copyright (c) {year} MirSinn.lu',
+  },
+  de: {
+    buttonLabel: 'Infos',
+    closeLabel: 'Dialog schließen',
+    dialogTitle: 'Über Mir Sinn',
+    deviceCode: 'Gerätecode',
+    unavailable: 'Nicht verfügbar',
+    appVersion: 'App-Version',
+    noPersonalInfo:
+      'MirSinn.lu speichert keine persönlichen Daten auf deinem Gerät oder in Online-Datenbanken.',
+    copyright: 'Copyright (c) {year} MirSinn.lu',
+  },
+  en: {
+    buttonLabel: 'Info',
+    closeLabel: 'Close dialog',
+    dialogTitle: 'About Mir Sinn',
+    deviceCode: 'Device code',
+    unavailable: 'Unavailable',
+    appVersion: 'App version',
+    noPersonalInfo:
+      'MirSinn.lu does not store any personal information on your device or in online databases.',
+    copyright: 'Copyright (c) {year} MirSinn.lu',
+  },
+};
+
 @Component({
   tag: 'app-root',
   styleUrls: ['app-root.css'],
@@ -34,8 +95,10 @@ export class AppRoot {
   @State() language: LanguageCode = 'lb';
   @State() currentPath: string = '/';
   @State() showInstallToast = false;
+  @State() showInfoDialog = false;
 
   private unsubscribeRouterChange?: () => void;
+  private infoDialogId = 'app-info-dialog';
 
   private handlePopState = () => {
     if (typeof window === 'undefined') return;
@@ -216,6 +279,32 @@ export class AppRoot {
     logAnalyticsEvent('install_toast_dismissed');
   };
 
+  private openInfoDialog = () => {
+    this.showInfoDialog = true;
+    logAnalyticsEvent('info_dialog_opened');
+  };
+
+  private closeInfoDialog = () => {
+    this.showInfoDialog = false;
+  };
+
+  private getDeviceShortCode() {
+    if (typeof window === 'undefined') {
+      return null as string | null;
+    }
+    const win = window as any;
+    const shortCodeValue = typeof win.__DEVICE_SHORT_CODE__ === 'string' ? win.__DEVICE_SHORT_CODE__.trim() : '';
+    return shortCodeValue || null;
+  }
+
+  @Listen('keydown', { target: 'window' })
+  handleWindowKeyDown(event: KeyboardEvent) {
+    if (!this.showInfoDialog) return;
+    if (event.key === 'Escape') {
+      this.closeInfoDialog();
+    }
+  }
+
   render() {
     const navLabels: Record<LanguageCode, { questions: string; history: string }> = {
       lb: { questions: 'Froen', history: 'Archiv' },
@@ -224,6 +313,9 @@ export class AppRoot {
       en: { questions: 'Questions', history: 'History' },
     };
     const labels = navLabels[this.language] || navLabels.lb;
+    const infoLabels = infoCopy[this.language] || infoCopy.lb;
+    const shortCode = this.getDeviceShortCode();
+    const year = new Date().getFullYear();
     return (
       <div class="app-shell">
         {this.showInstallToast && (
@@ -244,21 +336,37 @@ export class AppRoot {
               <span class="subtitle">Lëtzebuerg</span>
             </span>
           </button>
-          <label class="language-picker">
-            <span class="language-label" aria-hidden="true">
-              <img src={globeIcon} alt="" />
-            </span>
-            <div class="language-select">
-              <span class="language-select__current">{this.language.toUpperCase()}</span>
-              <select onInput={this.handleLanguageChange} aria-label="Select language">
-                {languages.map(lang => (
-                  <option value={lang.code} selected={this.language === lang.code}>
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </label>
+          <div class="header-actions">
+            <label class="language-picker">
+              <span class="language-label" aria-hidden="true">
+                <img src={globeIcon} alt="" />
+              </span>
+              <div class="language-select">
+                <span class="language-select__current">{this.language.toUpperCase()}</span>
+                <select onInput={this.handleLanguageChange} aria-label="Select language">
+                  {languages.map(lang => (
+                    <option value={lang.code} selected={this.language === lang.code}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </label>
+            <button
+              class="info-button"
+              type="button"
+              onClick={this.openInfoDialog}
+              aria-haspopup="dialog"
+              aria-expanded={this.showInfoDialog ? 'true' : 'false'}
+              aria-controls={this.infoDialogId}
+              aria-label={infoLabels.buttonLabel}
+            >
+              <span class="info-icon" aria-hidden="true">
+                <img src={infoIcon} alt="" />
+              </span>
+              <span class="info-label">{infoLabels.buttonLabel}</span>
+            </button>
+          </div>
         </header>
 
         <main class="app-content">
@@ -300,6 +408,40 @@ export class AppRoot {
             <span>{labels.history}</span>
           </button>
         </nav>
+        {this.showInfoDialog && (
+          <div class="info-dialog-overlay" role="presentation" onClick={this.closeInfoDialog}>
+            <div
+              class="info-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="info-dialog-title"
+              aria-describedby="info-dialog-description"
+              id={this.infoDialogId}
+              onClick={event => event.stopPropagation()}
+            >
+              <button class="info-dialog__close" type="button" onClick={this.closeInfoDialog} aria-label={infoLabels.closeLabel}>
+                x
+              </button>
+              <h2 id="info-dialog-title">{infoLabels.dialogTitle}</h2>
+              <div class="info-dialog__content" id="info-dialog-description">
+                <dl class="info-dialog__list">
+                  <div class="info-dialog__item">
+                    <dt>{infoLabels.deviceCode}</dt>
+                    <dd>{shortCode || infoLabels.unavailable}</dd>
+                  </div>
+                  <div class="info-dialog__item">
+                    <dt>{infoLabels.appVersion}</dt>
+                    <dd class="info-dialog__version">{APP_VERSION}</dd>
+                  </div>
+                </dl>
+                <p class="info-dialog__notice">{infoLabels.noPersonalInfo}</p>
+                <p class="info-dialog__copyright">
+                  {infoLabels.copyright.replace('{year}', String(year))}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

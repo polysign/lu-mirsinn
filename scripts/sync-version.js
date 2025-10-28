@@ -5,13 +5,8 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const packageJsonPath = path.join(rootDir, 'package.json');
-const targetFilePath = path.join(
-  rootDir,
-  'src',
-  'components',
-  'app-home',
-  'app-home.tsx',
-);
+const appHomeFilePath = path.join(rootDir, 'src', 'components', 'app-home', 'app-home.tsx');
+const versionModulePath = path.join(rootDir, 'src', 'global', 'version.ts');
 
 const readJson = filePath => {
   try {
@@ -34,12 +29,67 @@ const writeFile = (filePath, content) => {
 
 const updateVersionSpan = (source, version) => {
   const pattern = /(<span class="about-version">)v?\d+\.\d+\.\d+(<\/span>)/;
-  const replacement = `$1v${version}$2`;
   if (!pattern.test(source)) {
-    console.error('[sync-version] Unable to locate about-version span.');
+    return null;
+  }
+  return source.replace(pattern, `$1${version}$2`);
+};
+
+const updateVersionConstant = (source, version) => {
+  const pattern = /(export const APP_VERSION\s*=\s*['"])(v?\d+\.\d+\.\d+)(['"];?)/;
+  if (!pattern.test(source)) {
+    return null;
+  }
+  return source.replace(pattern, `$1${version}$3`);
+};
+
+const ensureFormattedVersion = version => (version.startsWith('v') ? version : `v${version}`);
+
+const applyUpdate = (filePath, updater, options = {}) => {
+  const { optional = false, create } = options;
+  const relativePath = path.relative(rootDir, filePath);
+
+  const fileExists = fs.existsSync(filePath);
+  if (!fileExists) {
+    if (typeof create === 'function') {
+      const content = create();
+      writeFile(filePath, content);
+      console.log(`[sync-version] Created ${relativePath}.`);
+      return;
+    }
+    if (optional) {
+      console.warn(`[sync-version] Skipped ${relativePath} (file not found).`);
+      return;
+    }
+    console.error(`[sync-version] ${relativePath} does not exist.`);
     process.exit(1);
   }
-  return source.replace(pattern, replacement);
+
+  let source;
+  try {
+    source = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    console.error(`[sync-version] Failed to read ${relativePath}`, error);
+    process.exit(1);
+  }
+
+  const nextSource = updater(source);
+  if (nextSource == null) {
+    if (optional) {
+      console.warn(`[sync-version] Skipped ${relativePath} (marker not found).`);
+      return;
+    }
+    console.error(`[sync-version] Marker not found in ${relativePath}.`);
+    process.exit(1);
+  }
+
+  if (source === nextSource) {
+    console.log(`[sync-version] ${relativePath} already up to date.`);
+    return;
+  }
+
+  writeFile(filePath, nextSource);
+  console.log(`[sync-version] Updated ${relativePath}.`);
 };
 
 (() => {
@@ -50,20 +100,23 @@ const updateVersionSpan = (source, version) => {
     process.exit(1);
   }
 
-  let targetSource;
-  try {
-    targetSource = fs.readFileSync(targetFilePath, 'utf8');
-  } catch (error) {
-    console.error(`[sync-version] Failed to read ${targetFilePath}`, error);
-    process.exit(1);
-  }
+  const formattedVersion = ensureFormattedVersion(version);
 
-  const nextSource = updateVersionSpan(targetSource, version);
-  if (targetSource === nextSource) {
-    console.log('[sync-version] about-version is already up to date.');
-    return;
-  }
+  applyUpdate(
+    versionModulePath,
+    source => updateVersionConstant(source, formattedVersion),
+    {
+      create: () => `export const APP_VERSION = '${formattedVersion}';\n`,
+    },
+  );
 
-  writeFile(targetFilePath, nextSource);
-  console.log(`[sync-version] Updated about-version span to v${version}.`);
+  applyUpdate(
+    appHomeFilePath,
+    source => updateVersionSpan(source, formattedVersion),
+    {
+      optional: true,
+    },
+  );
+
+  console.log(`[sync-version] Synced version markers to ${formattedVersion}.`);
 })();
