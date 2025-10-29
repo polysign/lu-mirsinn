@@ -51,14 +51,14 @@ async function getDeviceId() {
 
   const readIdb = async () => new Promise(res => {
     const tx = idb.transaction('kv', 'readonly');
-    const req = tx.objectStore('kv').get('device_id');
+    const req = tx.objectStore('kv').get('mir-sinn-device-id');
     req.onsuccess = () => res(req.result || null);
     req.onerror = () => res(null);
   });
 
   const writeIdb = async (v) => new Promise(res => {
     const tx = idb.transaction('kv', 'readwrite');
-    tx.objectStore('kv').put(v, 'device_id');
+    tx.objectStore('kv').put(v, 'mir-sinn-device-id');
     tx.oncomplete = () => res();
     tx.onerror = () => res();
   });
@@ -68,12 +68,12 @@ async function getDeviceId() {
 
   if (!did) {
     // fallback: localStorage
-    did = localStorage.getItem('device_id');
+    did = localStorage.getItem('mir-sinn-device-id');
   }
 
   if (!did) {
     did = gen();
-    try { localStorage.setItem('device_id', did); } catch {}
+    try { localStorage.setItem('mir-sinn-device-id', did); } catch {}
     if (idb) { try { await writeIdb(did); } catch {} }
   }
 

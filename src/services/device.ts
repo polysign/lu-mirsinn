@@ -1,4 +1,4 @@
-const DEVICE_ID_KEY = 'device_id';
+const DEVICE_ID_KEY = 'mir-sinn-device-id';
 
 const generateId = () => {
   if (typeof crypto.randomUUID === 'function') {

@@ -8,7 +8,6 @@
 .home {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
   width: 100%;
   box-sizing: border-box;
 }
@@ -34,17 +33,73 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
-.question-grid {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: 1fr;
+.question-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
   width: 100%;
   box-sizing: border-box;
 }
 
+.progress-indicator {
+  position: relative;
+  width: 100%;
+  margin-top: 0.85rem;
+  padding: 0.35rem 0.65rem 0.2rem;
+  margin-bottom: 1rem;
+}
+
+.progress-indicator__track {
+  position: absolute;
+  left: 0.65rem;
+  right: 0.65rem;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.08));
+  border-radius: 999px;
+}
+
+.progress-indicator__dots {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.progress-indicator__dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.24);
+  background: var(--card-surface, #ffffff);
+  box-shadow: 0 0 0 2px var(--card-surface, #ffffff);
+  transition: background 0.3s ease, border-color 0.3s ease,
+    transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.progress-indicator__dot--answered {
+  background: var(--lux-blue, #00a1de);
+  border-color: var(--lux-blue, #00a1de);
+  box-shadow: 0 0 0 2px rgba(0, 161, 222, 0.22);
+}
+
+.progress-indicator__dot--active {
+  border-color: var(--lux-red, #ed2939);
+  box-shadow: 0 0 0 3px rgba(237, 41, 57, 0.22);
+  transform: scale(1.14);
+}
+
 @media (min-width: 720px) {
-  .question-grid {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  .question-stack {
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .question-panel {
+    max-width: 640px;
   }
 }
 
@@ -230,10 +285,230 @@ button:active {
   box-shadow: none;
 }
 
+.secondary {
+  background: rgba(0, 161, 222, 0.12);
+  color: rgba(0, 0, 0, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(0, 161, 222, 0.3);
+}
+
+.secondary:active {
+  transform: translateY(1px);
+}
+
 .form-error {
   margin: 0;
   font-size: 0.85rem;
   color: var(--lux-red, #ed2939);
+}
+
+.question-panel--exiting {
+  animation: question-dismiss 0.42s ease forwards;
+  pointer-events: none;
+}
+
+.question-panel--enter {
+  animation: question-enter 0.6s cubic-bezier(0.2, 0.8, 0.4, 1) forwards;
+  will-change: transform, opacity, box-shadow;
+}
+
+@keyframes question-dismiss {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.9) translateY(16px);
+  }
+}
+
+@keyframes question-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(36px) scale(0.92);
+    box-shadow: 0 32px 48px rgba(0, 0, 0, 0.14);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1.03);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 1000;
+}
+
+.confetti-piece {
+  position: fixed;
+  width: 10px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--lux-red, #ed2939);
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  animation: confetti-pop 900ms ease-out forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes confetti-pop {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translate(0, 0) rotate(0deg)
+      scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%)
+      translate(var(--confetti-x, 0), var(--confetti-y, 0))
+      rotate(var(--confetti-rotation, 0deg))
+      scale(var(--confetti-scale, 1));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-panel--exiting {
+    animation-duration: 0.01ms;
+  }
+
+  .question-panel--enter {
+    animation: none;
+  }
+
+  .confetti-piece {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.home--completed {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.completion-message {
+  background: var(--card-surface, #ffffff);
+  border: 2px solid rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.completion-message h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--app-text, #1b1b1b);
+}
+
+.completion-message p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.share-panel__description {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.share-panel__status {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+}
+
+.share-panel__status--success {
+  background: rgba(0, 161, 222, 0.12);
+  color: rgba(0, 86, 130, 0.95);
+}
+
+.share-panel__status--error {
+  background: rgba(237, 41, 57, 0.12);
+  color: rgba(150, 25, 40, 0.9);
+}
+
+.install-panel__description {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.install-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.install-panel__steps {
+  margin: 0;
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: rgba(0, 161, 222, 0.08);
+  border: 2px solid rgba(0, 161, 222, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.install-panel__steps h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.78);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.install-panel__steps ol {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.install-panel__steps li {
+  line-height: 1.55;
+}
+
+@media (min-width: 640px) {
+  .install-panel__actions {
+    flex-direction: row;
+  }
 }
 
 .answered-block {
