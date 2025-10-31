@@ -1,4 +1,4 @@
-import type { QuestionDocument } from './firebase';
+import type { QuestionDocument, QuestionDay } from './firebase';
 
 const sampleOptions = [
   {
@@ -267,10 +267,9 @@ export const fallbackQuestions: QuestionDocument[] = [
 
 export const fallbackQuestion: QuestionDocument = fallbackQuestions[0];
 
-export const fallbackHistory: QuestionDocument[] = [
-  fallbackQuestion,
+const fallbackMay30Questions: QuestionDocument[] = [
   {
-    id: '05-30-2024',
+    id: '05-30-2024-q1',
     dateKey: '05-30-2024',
     question: {
       lb: 'Soll déi nei Tram bis op Esch verlängert ginn?',
@@ -300,7 +299,130 @@ export const fallbackHistory: QuestionDocument[] = [
     },
   },
   {
-    id: '05-29-2024',
+    id: '05-30-2024-q2',
+    dateKey: '05-30-2024',
+    question: {
+      lb: 'Soll eng Stau-Tax fir de Verkéier an der Stad agefouert ginn?',
+      fr: 'Faut-il introduire un péage urbain à Luxembourg-Ville ?',
+      de: 'Soll eine Staugebühr in Luxemburg-Stadt eingeführt werden?',
+      en: 'Should Luxembourg City introduce an urban congestion charge?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 750,
+      perOption: {
+        yes: 360,
+        no: 290,
+        unsure: 100,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 48.0, count: 360 },
+        { optionId: 'no', percentage: 38.7, count: 290 },
+        { optionId: 'unsure', percentage: 13.3, count: 100 },
+      ],
+      summary: {
+        lb: '750 Stëmmen: D’Meenunge si gespléckt iwwert eng méiglech Stau-Tax.',
+        fr: '750 votes : les avis sont partagés sur un péage urbain.',
+        de: '750 Stimmen: Die Meinungen zur Staugebühr sind geteilt.',
+        en: '750 votes: respondents remain split on a congestion charge.',
+      },
+    },
+  },
+  {
+    id: '05-30-2024-q3',
+    dateKey: '05-30-2024',
+    question: {
+      lb: 'Soll Lëtzebuerg Mietpräisser fir nei Locatiounen deckelen?',
+      fr: 'Le Luxembourg doit-il plafonner les loyers des nouveaux contrats?',
+      de: 'Soll Luxemburg Mietpreise für neue Verträge deckeln?',
+      en: 'Should Luxembourg cap rents on new leases?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 1040,
+      perOption: {
+        yes: 690,
+        no: 220,
+        unsure: 130,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 66.3, count: 690 },
+        { optionId: 'no', percentage: 21.2, count: 220 },
+        { optionId: 'unsure', percentage: 12.5, count: 130 },
+      ],
+      summary: {
+        lb: '1040 Participanten: Eng kloer Majoritéit ass fir Mietdeckelen.',
+        fr: '1040 participants : une majorité claire soutient le plafonnement.',
+        de: '1040 Teilnehmende: deutliche Mehrheit für Mietobergrenzen.',
+        en: '1040 participants: a clear majority backs rent caps.',
+      },
+    },
+  },
+  {
+    id: '05-30-2024-q4',
+    dateKey: '05-30-2024',
+    question: {
+      lb: 'Soll et méi streng Reegelen fir kuerzfristeg Vermietunge ginn?',
+      fr: 'Faut-il des règles plus strictes pour les locations de courte durée ?',
+      de: 'Braucht es strengere Regeln für Kurzzeitvermietungen?',
+      en: 'Should short-term rentals face stricter regulation?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 860,
+      perOption: {
+        yes: 540,
+        no: 180,
+        unsure: 140,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 62.8, count: 540 },
+        { optionId: 'no', percentage: 20.9, count: 180 },
+        { optionId: 'unsure', percentage: 16.3, count: 140 },
+      ],
+      summary: {
+        lb: '860 Stëmmen: D’Majoritéit wëll méi Kontroll iwwer Kurzvermietungen.',
+        fr: '860 votes : la majorité souhaite encadrer davantage les locations courtes.',
+        de: '860 Stimmen: Mehrheit für strengere Regeln bei Kurzzeitvermietungen.',
+        en: '860 votes: most favour tighter rules on short-term rentals.',
+      },
+    },
+  },
+  {
+    id: '05-30-2024-q5',
+    dateKey: '05-30-2024',
+    question: {
+      lb: 'Soll de ëffentlechen Transport nuets méi dacks fueren?',
+      fr: 'Le transport public doit-il circuler plus souvent la nuit ?',
+      de: 'Soll der öffentliche Verkehr nachts häufiger fahren?',
+      en: 'Should public transport run more frequently at night?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 890,
+      perOption: {
+        yes: 610,
+        no: 160,
+        unsure: 120,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 68.5, count: 610 },
+        { optionId: 'no', percentage: 18.0, count: 160 },
+        { optionId: 'unsure', percentage: 13.5, count: 120 },
+      ],
+      summary: {
+        lb: '890 Participanten: D’meescht wëllen nuets méi Bus- a Tramlinnen.',
+        fr: '890 participants : la plupart souhaitent plus de lignes nocturnes.',
+        de: '890 Teilnehmende: Mehrheit möchte mehr Nachtverkehr.',
+        en: '890 participants: most would like more frequent night transport.',
+      },
+    },
+  },
+];
+
+const fallbackMay29Questions: QuestionDocument[] = [
+  {
+    id: '05-29-2024-q1',
     dateKey: '05-29-2024',
     question: {
       lb: 'Ass Dir zefridden mat de publique Parks zu Lëtzebuerg?',
@@ -328,5 +450,146 @@ export const fallbackHistory: QuestionDocument[] = [
         en: '820 votes: "Yes" leads with 540 on public parks.',
       },
     },
+  },
+  {
+    id: '05-29-2024-q2',
+    dateKey: '05-29-2024',
+    question: {
+      lb: 'Soll d’Regierung méi Wunnengen an der Stad bauen?',
+      fr: 'Le gouvernement doit-il construire davantage de logements en ville ?',
+      de: 'Soll die Regierung mehr Wohnungen in der Stadt bauen?',
+      en: 'Should the government build more housing in the city?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 990,
+      perOption: {
+        yes: 670,
+        no: 180,
+        unsure: 140,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 67.7, count: 670 },
+        { optionId: 'no', percentage: 18.2, count: 180 },
+        { optionId: 'unsure', percentage: 14.1, count: 140 },
+      ],
+      summary: {
+        lb: '990 Stëmmen: Vill Leit wëllen aktiv Neubauprojeten.',
+        fr: '990 votes : beaucoup soutiennent de nouveaux projets de logements.',
+        de: '990 Stimmen: viele befürworten zusätzliche Wohnprojekte.',
+        en: '990 votes: many support new housing projects.',
+      },
+    },
+  },
+  {
+    id: '05-29-2024-q3',
+    dateKey: '05-29-2024',
+    question: {
+      lb: 'Soll Lëtzebuerg de Mindestloun erhéijen?',
+      fr: 'Le Luxembourg doit-il augmenter le salaire minimum ?',
+      de: 'Soll Luxemburg den Mindestlohn erhöhen?',
+      en: 'Should Luxembourg raise the minimum wage?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 1150,
+      perOption: {
+        yes: 760,
+        no: 210,
+        unsure: 180,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 66.1, count: 760 },
+        { optionId: 'no', percentage: 18.3, count: 210 },
+        { optionId: 'unsure', percentage: 15.7, count: 180 },
+      ],
+      summary: {
+        lb: '1150 Participanten: Zwee Drëttel sinn fir eng Upassung vum Mindestloun.',
+        fr: '1150 participants : deux tiers souhaitent augmenter le salaire minimum.',
+        de: '1150 Teilnehmende: zwei Drittel für eine Erhöhung des Mindestlohns.',
+        en: '1150 participants: two thirds back a higher minimum wage.',
+      },
+    },
+  },
+  {
+    id: '05-29-2024-q4',
+    dateKey: '05-29-2024',
+    question: {
+      lb: 'Soll Lëtzebuerg méi an erneierbar Energien investéieren?',
+      fr: "Le Luxembourg devrait-il investir davantage dans les énergies renouvelables ?",
+      de: 'Soll Luxemburg stärker in erneuerbare Energien investieren?',
+      en: 'Should Luxembourg invest more in renewable energy?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 1280,
+      perOption: {
+        yes: 840,
+        no: 270,
+        unsure: 170,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 65.6, count: 840 },
+        { optionId: 'no', percentage: 21.1, count: 270 },
+        { optionId: 'unsure', percentage: 13.3, count: 170 },
+      ],
+      summary: {
+        lb: '1280 Stemmen: "Jo" feiert mat 840 fir erneierbar Energien.',
+        fr: '1280 votes : "Oui" est en tete avec 840 pour les energies renouvelables.',
+        de: '1280 Stimmen: "Ja" fuehrt mit 840 fuer erneuerbare Energien.',
+        en: '1280 votes: "Yes" leads with 840 for renewable energy.',
+      },
+    },
+  },
+  {
+    id: '05-29-2024-q5',
+    dateKey: '05-29-2024',
+    question: {
+      lb: 'Soll Lëtzebuerg zousätzlech Feierdeeg kréien?',
+      fr: 'Le Luxembourg devrait-il ajouter de nouveaux jours fériés ?',
+      de: 'Soll Luxemburg zusätzliche Feiertage einführen?',
+      en: 'Should Luxembourg add new public holidays?',
+    },
+    options: sampleOptions,
+    results: {
+      totalResponses: 760,
+      perOption: {
+        yes: 420,
+        no: 230,
+        unsure: 110,
+      },
+      breakdown: [
+        { optionId: 'yes', percentage: 55.3, count: 420 },
+        { optionId: 'no', percentage: 30.3, count: 230 },
+        { optionId: 'unsure', percentage: 14.5, count: 110 },
+      ],
+      summary: {
+        lb: '760 Stëmmen: méi wéi d’Hallschent fënnt zousätzlech Feierdeeg gutt.',
+        fr: '760 votes : plus de la moitié est pour de nouveaux jours fériés.',
+        de: '760 Stimmen: Mehr als die Hälfte befürwortet zusätzliche Feiertage.',
+        en: '760 votes: more than half are in favor of extra public holidays.',
+      },
+    },
+  },
+];
+
+export const fallbackHistory: QuestionDay[] = [
+  {
+    id: '05-31-2024',
+    dateKey: '05-31-2024',
+    questions: fallbackQuestions.map(question => ({
+      ...question,
+      dateKey: '05-31-2024',
+    })),
+  },
+  {
+    id: '05-30-2024',
+    dateKey: '05-30-2024',
+    questions: fallbackMay30Questions,
+  },
+  {
+    id: '05-29-2024',
+    dateKey: '05-29-2024',
+    questions: fallbackMay29Questions,
   },
 ];

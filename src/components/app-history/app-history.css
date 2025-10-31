@@ -4,6 +4,21 @@
   gap: 1.25rem;
 }
 
+.history-day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.history-day-header {
+  padding: 0 0.5rem;
+}
+
+.history-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
 
 .history-card {
   background: var(--card-surface, #ffffff);
@@ -35,8 +50,28 @@
 
 .history-card h3 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1rem;
   color: var(--app-text);
+}
+
+.question-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.question-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.7);
 }
 
 .date {

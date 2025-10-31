@@ -63,6 +63,12 @@ export interface QuestionDocument {
   };
 }
 
+export interface QuestionDay {
+  id: string;
+  dateKey: string;
+  questions: QuestionDocument[];
+}
+
 export interface AnswerDocument {
   deviceId: string;
   optionId: string;
@@ -329,29 +335,41 @@ const parseDateKey = (key: string) => {
 
 export async function getRecentQuestions(
   limitCount = 14,
-): Promise<QuestionDocument[]> {
+): Promise<QuestionDay[]> {
   const db = ensureFirestore();
   if (!db) {
     return [];
   }
   try {
     const snapshot = await getDocs(collection(db, 'questions'));
-    const docs = snapshot.docs.map(docSnap => {
-      const data = docSnap.data() as Omit<QuestionDocument, 'id'>;
-      const dateKey = (data as any).dateKey || docSnap.id;
-      return {
-        ...data,
-        id: docSnap.id,
-        dateKey,
-      };
-    });
-    return docs
-      .sort(
-        (a, b) =>
-          parseDateKey((b as any).dateKey || b.id) -
-          parseDateKey((a as any).dateKey || a.id),
-      )
+    const dayDocs = snapshot.docs
+      .map(docSnap => {
+        const data = docSnap.data() as Partial<QuestionDay>;
+        const dateKey = (data as any)?.dateKey || docSnap.id;
+        return {
+          id: docSnap.id,
+          dateKey,
+        };
+      })
+      .sort((a, b) => parseDateKey(b.dateKey) - parseDateKey(a.dateKey))
       .slice(0, limitCount);
+
+    const dayEntries = await Promise.all(
+      dayDocs.map(async day => {
+        const questions = await getTodayQuestions(day.id);
+        if (!questions.length) {
+          return null;
+        }
+        return {
+          ...day,
+          questions,
+        } as QuestionDay;
+      }),
+    );
+
+    return dayEntries.filter(
+      (entry): entry is QuestionDay => entry !== null,
+    );
   } catch (error) {
     console.warn('[firebase] Failed to load questions list', error);
     return [];

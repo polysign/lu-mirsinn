@@ -2489,6 +2489,99 @@ exports.reconcileLinkedDevices = onSchedule(
   async () => reconcileLinkedDeviceDocuments(),
 );
 
+async function buildQuestionResultsForDoc(dateKey, questionRef, questionDoc) {
+  const questionId = questionRef.id;
+  const answersSnapshot = await questionRef.collection("answers").get();
+
+  const perOption = {};
+  const orderedOptionIds = [];
+
+  (questionDoc?.options || []).forEach(option => {
+    const optionId = typeof option?.id === "string" ? option.id : null;
+    if (!optionId) {
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(perOption, optionId)) {
+      perOption[optionId] = 0;
+      orderedOptionIds.push(optionId);
+    }
+  });
+
+  answersSnapshot.forEach(docSnap => {
+    const data = docSnap.data() || {};
+    const rawOptionId = data.optionId;
+    const optionId = typeof rawOptionId === "string" ? rawOptionId : null;
+    if (!optionId) {
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(perOption, optionId)) {
+      perOption[optionId] = 0;
+      orderedOptionIds.push(optionId);
+    }
+    perOption[optionId] += 1;
+  });
+
+  const totalResponses = Object.values(perOption).reduce(
+    (sum, value) => sum + (typeof value === "number" ? value : 0),
+    0,
+  );
+
+  const breakdown = orderedOptionIds.map(optionId => {
+    const count = perOption[optionId] || 0;
+    const percentage = totalResponses
+      ? Math.round((count / totalResponses) * 1000) / 10
+      : 0;
+    return {
+      optionId,
+      count,
+      percentage,
+    };
+  });
+
+  let summary;
+  if (!totalResponses) {
+    summary = createNoVoteSummary(questionDoc);
+  } else {
+    try {
+      const openaiClient = getOpenAIClient();
+      const model = getModelName();
+      summary = await generateResultAnalysis(
+        questionDoc,
+        breakdown,
+        totalResponses,
+        openaiClient,
+        model,
+      );
+    } catch (error) {
+      logger.error("Unable to generate analysis for question results", {
+        dateKey,
+        questionId,
+        error: error.message,
+      });
+      summary = fallbackResultSummary(questionDoc, breakdown, totalResponses);
+    }
+  }
+
+  const resultRecord = {
+    totalResponses,
+    perOption,
+    breakdown,
+    summary,
+  };
+
+  await questionRef.set(
+    {
+      results: {
+        ...resultRecord,
+        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    },
+    {merge: true},
+  );
+
+  return resultRecord;
+}
+
 async function refreshHistoricalStats() {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -2501,6 +2594,87 @@ async function refreshHistoricalStats() {
     return 'missing_question';
   }
   const questionDoc = questionSnap.data() || {};
+
+  const questionsSnapshot = await questionRef.collection("questions").get();
+  if (!questionsSnapshot.empty) {
+    const questionEntries = questionsSnapshot.docs.map(docSnap => ({
+      id: docSnap.id,
+      ref: docSnap.ref,
+      data: docSnap.data() || {},
+    }));
+
+    const resultsByQuestionId = new Map();
+    let aggregateTotalResponses = 0;
+    for (const entry of questionEntries) {
+      try {
+        const resultRecord = await buildQuestionResultsForDoc(
+          dateKey,
+          entry.ref,
+          entry.data,
+        );
+        resultsByQuestionId.set(entry.id, {
+          question: entry.data,
+          results: resultRecord,
+        });
+        aggregateTotalResponses += resultRecord.totalResponses;
+      } catch (error) {
+        logger.error('Failed to refresh stats for question', {
+          dateKey,
+          questionId: entry.id,
+          error: error.message,
+        });
+      }
+    }
+
+    const primaryQuestionId =
+      questionDoc.primaryQuestionId ||
+      (questionEntries[0] ? questionEntries[0].id : null);
+    const primaryEntry =
+      (primaryQuestionId && resultsByQuestionId.get(primaryQuestionId)) ||
+      null;
+    const fallbackEntry =
+      primaryEntry ||
+      (resultsByQuestionId.size ? resultsByQuestionId.values().next().value : null);
+
+    if (fallbackEntry) {
+      await questionRef.set(
+        {
+          results: {
+            ...fallbackEntry.results,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          },
+        },
+        {merge: true},
+      );
+    } else {
+      await questionRef.set(
+        {
+          results: {
+            totalResponses: 0,
+            perOption: {},
+            breakdown: [],
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+            summary: createNoVoteSummary(questionDoc),
+          },
+        },
+        {merge: true},
+      );
+    }
+
+    logger.info('Historical stats refreshed', {
+      dateKey,
+      mode: 'multi-question',
+      questionsProcessed: questionEntries.length,
+      totalResponses: aggregateTotalResponses,
+    });
+
+    return {
+      status: 'updated',
+      dateKey,
+      questionsProcessed: questionEntries.length,
+      totalResponses: aggregateTotalResponses,
+    };
+  }
 
   let answersSnap = await db.collection(`questions/${dateKey}/answers`).get();
   if (answersSnap.empty) {
